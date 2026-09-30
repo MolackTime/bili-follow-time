@@ -175,18 +175,32 @@
     if (!s) return null;
     if (/^\d{1,12}$/.test(s)) return { mid: s, kind: 'raw' };
 
-    var m = s.match(/space\.bilibili\.com\/(\d+)/i);
-    if (m) return { mid: m[1], kind: 'space' };
+    /* space.bilibili.com/<mid>
+       ⚠️ 必须把第一段整个取出来做「全数字」判断，不能写成 \/(\d+) 就完事 ——
+       那样 /309b23d9-804a-49d8-a310-3cd878df9299 会被截成 mid=309，
+       静默查成一个完全无关的真实用户。 */
+    var m = s.match(/space\.bilibili\.com\/([^\s\/?#\u4e00-\u9fa5]+)/i);
+    if (m) {
+      var seg = m[1];
+      if (/^\d{1,12}$/.test(seg)) return { mid: seg, kind: 'space' };
+      return { error: 'SPACE_NOT_MID', seg: seg };
+    }
 
-    m = s.match(/[?&](?:mid|up_id|uid|fid|vmid)=(\d+)/i);
+    /* 分享链接里的查询参数。数字后同样要求边界，避免 mid=309abc 被截成 309 */
+    m = s.match(/[?&](?:mid|up_id|uid|fid|vmid)=(\d{1,12})(?=[&#]|$)/i);
     if (m) return { mid: m[1], kind: 'query' };
 
     if (/^https?:\/\/b23\.tv\/[A-Za-z0-9_-]+/i.test(s)) {
       m = s.match(/https?:\/\/b23\.tv\/[A-Za-z0-9_-]+/i);
       return { short: m[0], kind: 'short' };
     }
+
+    /* 从分享文案里抠链接。
+       ⚠️ 必须判断 m[0] !== s 才递归 —— 否则抠出来的就是原串本身，
+       会无限递归直到 RangeError: Maximum call stack size exceeded
+       （任何非 bilibili 的 https 链接都能触发）。 */
     m = s.match(/https?:\/\/[^\s"'<>\u4e00-\u9fa5]+/);
-    if (m) {
+    if (m && m[0] !== s) {
       var inner = parseMidSync(m[0]);
       if (inner) return inner;
     }
@@ -211,35 +225,89 @@
     });
   }
 
-  async function parseMid(input) {
+  /* 把解析错误翻成给人看的话。所有入口共用，避免各处文案不一致。 */
+  function parseErrorText(p) {
+    if (!p || !p.error) return '解析失败';
+    switch (p.error) {
+      case 'FORMAT':
+        return '无法识别输入。支持：UP 主主页链接（space.bilibili.com/数字 mid）、纯数字 mid、b23.tv 短链。';
+      case 'SPACE_NOT_MID':
+        return '链接不对：space.bilibili.com 后面必须是纯数字的 mid，' +
+          '而你给的这一段是「' + (p.seg || '') + '」。' +
+          '这看起来不是 UP 主主页链接（可能是失效的分享链接或复制串了）。';
+      case 'NO_USER':
+        return '这个 mid（' + p.mid + '）对应的用户不存在，请检查链接是否完整、数字有没有复制漏。';
+      case 'SHORT_OFF':
+        return '短链解析已关闭（可在「设置 → 解析」里重新打开）。';
+      case 'SHORT_FAIL':
+        return '短链解析失败：' + (p.detail || '网络错误');
+      case 'SHORT_NO_MID':
+        return '这条短链指向的内容里没有 UP 主信息，请在 B 站 App 里点进 TA 的主页再复制链接。';
+      default:
+        return '解析失败：' + p.error;
+    }
+  }
+
+  /* 存在性校验。返回 true=存在 / false=确定不存在 / null=问不出来（风控、网络等）
+     只有明确 false 才应该阻断流程，null 一律放行。 */
+  async function checkUserExists(mid, signal) {
+    try {
+      var j = await apiGet('/x/web-interface/card', { mid: mid }, { signal: signal });
+      if (!j) return null;
+      if (j.code === -404) return false;
+      if (j.code === 0 && j.data && j.data.card) return true;
+      return null;
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
+      return null;
+    }
+  }
+
+  async function parseMid(input, signal) {
     var r = parseMidSync(input);
     if (!r) return { error: 'FORMAT' };
-    if (!r.short) return r;
-    if (!cfg.get('resolveShort')) return { error: 'SHORT_OFF' };
+    if (r.error) return r;          /* 已经在同步阶段判定为坏链接（如 UUID 段） */
 
-    var finalUrl;
-    try {
-      finalUrl = await resolveRedirect(r.short);
-    } catch (e) {
-      return { error: 'SHORT_FAIL', detail: e && e.message ? e.message : String(e) };
-    }
+    if (r.short) {
+      if (!cfg.get('resolveShort')) return { error: 'SHORT_OFF' };
 
-    var q = finalUrl.match(/[?&](?:mid|up_id|uid|vmid)=(\d+)/i);
-    if (q) return { mid: q[1], kind: 'short-query', from: finalUrl };
-
-    var sp = finalUrl.match(/space\.bilibili\.com\/(\d+)/i);
-    if (sp) return { mid: sp[1], kind: 'short-space', from: finalUrl };
-
-    var bv = finalUrl.match(/\/video\/(BV[0-9A-Za-z]{10})/);
-    if (bv) {
+      var finalUrl;
       try {
-        var j = await apiGet('/x/web-interface/view', { bvid: bv[1] });
-        if (j && j.code === 0 && j.data && j.data.owner && j.data.owner.mid) {
-          return { mid: String(j.data.owner.mid), kind: 'short-video', from: finalUrl };
+        finalUrl = await resolveRedirect(r.short);
+      } catch (e) {
+        return { error: 'SHORT_FAIL', detail: e && e.message ? e.message : String(e) };
+      }
+
+      var q = finalUrl.match(/[?&](?:mid|up_id|uid|vmid)=(\d{1,12})(?=[&#]|$)/i);
+      if (q) {
+        r = { mid: q[1], kind: 'short-query', from: finalUrl };
+      } else {
+        var sp = finalUrl.match(/space\.bilibili\.com\/(\d{1,12})(?=[\/?#]|$)/i);
+        if (sp) {
+          r = { mid: sp[1], kind: 'short-space', from: finalUrl };
+        } else {
+          r = { kind: 'short' };
+          var bv = finalUrl.match(/\/video\/(BV[0-9A-Za-z]{10})/);
+          if (bv) {
+            try {
+              var j = await apiGet('/x/web-interface/view', { bvid: bv[1] }, { signal: signal });
+              if (j && j.code === 0 && j.data && j.data.owner && j.data.owner.mid) {
+                r = { mid: String(j.data.owner.mid), kind: 'short-video', from: finalUrl };
+              }
+            } catch (e) { /* 尽力而为，失败就走下面的 SHORT_NO_MID */ }
+          }
+          if (!r.mid) return { error: 'SHORT_NO_MID', from: finalUrl };
         }
-      } catch (e) { /* ignore */ }
+      }
     }
-    return { error: 'SHORT_NO_MID', from: finalUrl };
+
+    /* 解析出 mid 之后可选地确认一下这个人真的存在，
+       免得"用户不存在"被误报成"未关注 / 0 条"。 */
+    if (cfg.get('verifyUser')) {
+      var exists = await checkUserExists(r.mid, signal);
+      if (exists === false) return { error: 'NO_USER', mid: r.mid };
+    }
+    return r;
   }
 
   /* =========================================================================
@@ -290,6 +358,11 @@
       key: 'othersCap', group: 'query', label: '查他人条数上限', type: 'number', def: 250,
       min: 1, max: 250, step: 10,
       hint: '实际上限受接口限制：兼容接口 250 条、标准接口 100 条。设超了会被自动夹紧。'
+    },
+    {
+      key: 'verifyUser', group: 'query', label: '查询前校验用户是否存在', type: 'switch', def: true,
+      hint: '解析出 mid 后先花一次轻量请求确认这个用户真的存在，避免把「用户不存在」' +
+        '误报成「未关注 / 共 0 条」。觉得多一次请求碍事可以关掉。'
     },
 
     /* ---- B 速度与网络 ---- */
@@ -1360,16 +1433,8 @@
       }
 
       setBusy(true, '解析中…');
-      var p = await parseMid(input);
-      if (p.error) {
-        var map = {
-          FORMAT: '无法识别输入。支持：UP 主主页链接、纯数字 mid、b23.tv 短链。',
-          SHORT_OFF: '短链解析已关闭（可在设置 → 解析 中打开）。',
-          SHORT_FAIL: '短链解析失败：' + (p.detail || ''),
-          SHORT_NO_MID: '短链指向的内容里没有 UP 主信息，请在 App 里点进 TA 的主页复制链接。'
-        };
-        throw new Error(map[p.error] || '解析失败');
-      }
+      var p = await parseMid(input, ctrl.abort.signal);
+      if (p.error) throw new Error(parseErrorText(p));
 
       setBusy(true, '查询中…');
       var rel = await throttled(function () {
@@ -1443,14 +1508,14 @@
           vmid = selfMid;
           ui.inMine.value = selfMid;
         } else {
-          var pm = await parseMid(input);
-          if (pm.error) throw new Error('无法识别输入，请粘贴你的 B 站主页链接或直接填 mid。');
+          var pm = await parseMid(input, ctrl.abort.signal);
+          if (pm.error) throw new Error(parseErrorText(pm));
           vmid = pm.mid;
         }
       } else {
         if (!input) { showMsg(msgEl, '请粘贴对方的主页链接，或直接填 mid。', 'warn'); setBusy(false, ''); ctrl.abort = null; return; }
-        var po = await parseMid(input);
-        if (po.error) throw new Error('无法识别输入，请粘贴对方的主页链接或直接填 mid。');
+        var po = await parseMid(input, ctrl.abort.signal);
+        if (po.error) throw new Error(parseErrorText(po));
         vmid = po.mid;
       }
 
