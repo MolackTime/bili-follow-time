@@ -115,6 +115,8 @@
   }
   .mini:hover{border-color:var(--accent);color:var(--accent)}
   .mini.ok{border-color:#2e9e5b;color:#2e9e5b}
+  .mini.bad{border-color:#c0392b;color:#c0392b}
+  .mini[disabled]{opacity:.6;cursor:default}
   .fb{margin-top:12px;border:1px dashed var(--line);border-radius:9px;padding:11px 13px;background:var(--bg)}
   .fb[open]{background:var(--bg-soft)}
   .fb summary{font-size:13.2px;font-weight:600;color:var(--accent)}
@@ -229,12 +231,13 @@
       <div class="irow">
         <span class="inum">1</span>
         <div class="body">
-          <b>装浏览器扩展 Tampermonkey</b>
-          <span>Chrome / Edge / Firefox / Safari 都有。
-            <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">官网下载</a>
-            · <a href="https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd" target="_blank" rel="noopener">Edge 商店</a>
-            · <a href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank" rel="noopener">Chrome 商店</a>
-          </span>
+          <b>装浏览器扩展 Tampermonkey（油猴）</b>
+          <span>Chrome / Edge / Firefox / Safari 都有。下面的按钮会按你当前用的浏览器自动指向对应商店。</span>
+          <div class="urlline">
+            <a class="mini" id="tm-store" href="https://www.tampermonkey.net/" target="_blank" rel="noopener">前往商店安装</a>
+            <a class="mini" href="https://www.tampermonkey.net/" target="_blank" rel="noopener">官网（含全部浏览器）</a>
+          </div>
+          <div id="tm-tip" style="margin-top:8px;font-size:12.8px;color:#7b8390"></div>
         </div>
       </div>
       <div class="irow">
@@ -263,12 +266,32 @@
       <div class="irow">
         <span class="inum">3</span>
         <div class="body">
+          <b>装不上脚本？下载文件手动导入</b>
+          <span>如果点「安装用户脚本」没反应（网络受限、浏览器拦截、或非 https 环境），把脚本下载到本地再手动导入。</span>
+          <div class="urlline">
+            <button class="mini" id="btn-download" type="button">⤓ 下载 .user.js 文件</button>
+          </div>
+          <details class="fb">
+            <summary>下载之后怎么导入？</summary>
+            <ol>
+              <li><b>最简单</b>：把下载到的 <code>bili-follow-time.user.js</code> 文件<b>直接拖进浏览器窗口</b>，油猴会弹出安装界面。</li>
+              <li>或者双击该文件（系统关联了浏览器时），同样会触发安装。</li>
+              <li>也可以手动装：点 Tampermonkey 图标 → <b>管理面板</b> → 左侧 <b>实用工具</b> → 用 <b>「从 URL 安装」</b>把地址粘进去，或用<b>导入</b>功能选择刚下载的文件（<span style="color:#b7791f">不同油猴版本的菜单名略有差异</span>）。</li>
+            </ol>
+            <p>💡 下载的脚本和从链接安装的<b>完全一样</b>，后续更新只需重复这个流程。想省事的话，建议还是想办法走第 2 步的链接安装。</p>
+          </details>
+        </div>
+      </div>
+      <div class="irow">
+        <span class="inum">4</span>
+        <div class="body">
           <b>打开任意 B 站页面开始使用</b>
           <span>比如 <a href="https://space.bilibili.com/1643718" target="_blank" rel="noopener">space.bilibili.com/1643718</a>，
             右下角会出现一个 ⏱ 悬浮球。点开，粘贴你想查的主页链接，回车。</span>
         </div>
       </div>
     </div>
+    <p class="note" style="margin-top:14px">📱 <b>手机端</b>：需要能装扩展的浏览器 App 才行（Android 可用 Firefox / Kiwi，iOS 可用 Safari + Userscripts 类扩展）；微信、QQ 内置浏览器不支持。</p>
   </div>
 </section>
 
@@ -437,6 +460,98 @@
       } else {
         legacyCopy();
       }
+    });
+  }
+
+  /* ------------------------------------------------------------------
+   * 按当前浏览器指向对应商店。
+   * 顺序很重要：国产浏览器（360/QQ/搜狗…）的 UA 里几乎都带 "Chrome"，
+   * 所以必须先判它们，再判 Edg / OPR / Firefox / Chrome / Safari。
+   * ------------------------------------------------------------------ */
+  var BROWSERS = {
+    edge:    { name: 'Edge',    url: 'https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd' },
+    chrome:  { name: 'Chrome',  url: 'https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo' },
+    firefox: { name: 'Firefox', url: 'https://addons.mozilla.org/firefox/addon/tampermonkey/' },
+    opera:   { name: 'Opera',   url: 'https://addons.opera.com/extensions/details/tampermonkey/' },
+    safari:  { name: 'Safari',  url: 'https://www.tampermonkey.net/?ext=dhdg&browser=safari' }
+  };
+
+  function detectBrowser() {
+    var ua = navigator.userAgent || '';
+    var domestic = /(360SE|360EE|QihooBrowser|QQBrowser|TencentTraveler|Sogou|Maxthon|LBBROWSER|2345Explorer|UCBrowser|TheWorld|BIDUBrowser)/i;
+    var m = ua.match(domestic);
+    if (m) return { name: m[1], url: 'https://www.tampermonkey.net/', domestic: true };
+    if (/Edg\//.test(ua)) return BROWSERS.edge;
+    if (/OPR\/|Opera/.test(ua)) return BROWSERS.opera;
+    if (/Firefox\/|FxiOS/.test(ua)) return BROWSERS.firefox;
+    if (/Chrome\//.test(ua)) return BROWSERS.chrome;
+    if (/Safari\//.test(ua)) return BROWSERS.safari;
+    return null;
+  }
+
+  var br = detectBrowser();
+  if (br) {
+    var storeBtn = document.getElementById('tm-store');
+    if (storeBtn) {
+      storeBtn.href = br.url;
+      storeBtn.textContent = '前往 ' + br.name + ' 商店安装';
+    }
+    var tmBtn = document.getElementById('btn-tm');
+    if (tmBtn) {
+      tmBtn.href = br.url;
+      tmBtn.textContent = '没装油猴？点这里（' + br.name + '）';
+    }
+    var tip = document.getElementById('tm-tip');
+    if (tip) {
+      tip.textContent = '检测到你在用 ' + br.name + '，上面的按钮已指向对应的商店页面。' +
+        (br.domestic ? '⚠️ 国产浏览器对 Tampermonkey 的安装拦截支持较差，建议改用 Edge 或 Chrome。' : '');
+    }
+  }
+
+  /* ------------------------------------------------------------------
+   * 下载脚本文件：必须走 fetch + Blob。
+   * <a download> 对跨域 URL 是无效的（浏览器会直接导航过去），
+   * 所以先把文件取回来（jsDelivr 带 CORS 头），再用同源 blob 触发下载。
+   * ------------------------------------------------------------------ */
+  var dlBtn = document.getElementById('btn-download');
+  if (dlBtn) {
+    dlBtn.addEventListener('click', function () {
+      var label = dlBtn.textContent;
+      dlBtn.disabled = true;
+      dlBtn.textContent = '准备中…';
+      fetch(installUrl, { cache: 'no-store' })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.text();
+        })
+        .then(function (code) {
+          if (code.indexOf('==UserScript==') < 0) throw new Error('内容异常');
+          var blob = new Blob([code], { type: 'text/javascript;charset=utf-8' });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = FILE;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 3000);
+          dlBtn.disabled = false;
+          dlBtn.classList.add('ok');
+          dlBtn.textContent = '已下载 ✓';
+          setTimeout(function () {
+            dlBtn.classList.remove('ok');
+            dlBtn.textContent = label;
+          }, 2500);
+        })
+        .catch(function () {
+          window.open(installUrl, '_blank', 'noopener');
+          dlBtn.disabled = false;
+          dlBtn.classList.add('bad');
+          dlBtn.textContent = '取不回文件，已新标签页打开';
+          setTimeout(function () {
+            dlBtn.classList.remove('bad');
+            dlBtn.textContent = label;
+          }, 3200);
+        });
     });
   }
 

@@ -35,6 +35,18 @@ https://cdn.jsdelivr.net/gh/MolackTime/bili-follow-time@main/bili-follow-time.us
 https://gh-proxy.com/https://raw.githubusercontent.com/MolackTime/bili-follow-time/main/bili-follow-time.user.js
 ```
 
+### 方式三：下载文件手动导入
+
+如果上面两种方式点了都没反应（网络受限、浏览器拦截、或不在 https 环境），可以直接下载脚本文件手动导入：
+
+1. 在落地页点「**⤓ 下载 .user.js 文件**」，或自行保存
+   <https://cdn.jsdelivr.net/gh/MolackTime/bili-follow-time@main/bili-follow-time.user.js>
+2. 把下载到的 `bili-follow-time.user.js` **直接拖进浏览器窗口**，油猴会弹出安装界面
+3. 或者打开油猴**管理面板 → 实用工具**，用「从 URL 安装」粘贴地址，或导入本地文件
+
+> ⚠️ 油猴只会在「**https 地址上真实存在的 `.user.js` 文件**」上自动弹出安装界面。
+> 通过 `file://` 本地文件、相对路径、或非 https 地址点安装，都不会有任何反应。
+
 ---
 
 ## 使用
