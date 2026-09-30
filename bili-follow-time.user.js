@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站关注时间一键查询
 // @namespace    https://github.com/MolackTime/bili-follow-time
-// @version      1.2.1
+// @version      1.2.2
 // @description  查询你关注某个 UP 主的时间；导出/筛选/排序你的全部关注列表。所有参数均可在设置面板中调整。
 // @author       MolackTime
 // @license      MIT
@@ -34,7 +34,7 @@
    * 0. 常量
    * ======================================================================= */
 
-  var VERSION = '1.2.1';
+  var VERSION = '1.2.2';
   var DEFAULT_API_BASE = 'https://api.bilibili.com';
   var CFG_PREFIX = 'bft:cfg:';
   var UI_PREFIX = 'bft:ui:';
@@ -123,11 +123,32 @@
     return fmtFull(ts);
   }
 
+  /* attribute 的完整取值（B站文档）：
+     0 未关注 / 1 悄悄关注（官方标注已下线，但值仍可能出现）/ 2 已关注 / 6 已互粉 / 128 已拉黑。
+     ⚠️ 一定要按 attribute 判定关系，不能按 mtime ——
+        「已关注但接口没给 mtime」是真实存在的（mtime 为 0），
+        旧代码拿 mtime 当主判据，会把它误报成「未关注」。 */
   function attrLabel(a) {
-    if (a === 2) return '已关注';
-    if (a === 6) return '已互粉';
-    if (a === 128) return '已拉黑';
-    return '未关注';
+    switch (Number(a)) {
+      case 0: return '未关注';
+      case 1: return '悄悄关注';
+      case 2: return '已关注';
+      case 6: return '已互粉';
+      case 128: return '已拉黑';
+      default: return '状态未知';
+    }
+  }
+
+  /* 悄悄关注也算关注（值 1） */
+  function attrFollowed(a) {
+    var n = Number(a);
+    return n === 1 || n === 2 || n === 6;
+  }
+
+  /* 给用户看的原始值，便于在"结果不符预期"时自证 */
+  function relDetail(rel) {
+    return '接口返回：attribute=' + (rel.attribute === undefined ? '?' : rel.attribute) +
+      '，mtime=' + (rel.mtime || 0) + '，mid ' + rel.mid;
   }
 
   function fmtDuration(sec) {
@@ -1272,7 +1293,8 @@
 
     /* 空间页小标签 */
     '.chip{position:fixed;left:16px;top:76px;z-index:2147483000;background:var(--bg);border:1px solid var(--line);',
-    'border-radius:8px;padding:6px 12px;box-shadow:var(--shadow);font-size:12px;}',
+    'border-radius:8px;padding:6px 12px;box-shadow:var(--shadow);font-size:12px;',
+    'max-width:min(680px,92vw);line-height:1.6;}',
     '.chip b{color:var(--accent);}',
 
     /* toast */
@@ -1681,26 +1703,53 @@
 
       ui.resultSingle.textContent = '';
       var fmt = cfg.get('timeFormat');
-      if (rel.mtime) {
-        ui.resultSingle.appendChild(h('div', { class: 'kv' },
-          h('span', { class: 'muted' }, isSelf ? '你关注你自己的时间' : '你关注 TA 的时间'),
-          h('span', { class: 'big', text: fmtTime(rel.mtime, fmt) }),
-          h('span', { class: 'tag', text: attrLabel(rel.attribute) }),
-          h('span', { class: 'tag', text: 'mid ' + rel.mid })
-        ));
-        ui.resultSingle.appendChild(h('div', { class: 'muted gap' },
-          '距今 ' + fmtAgo(rel.mtime) + '　·　时间戳 ' + rel.mtime));
-      } else if (rel.attribute === 128) {
+      var att = rel.attribute;
+      var label = attrLabel(att);
+
+      if (attrFollowed(att)) {
+        /* 已关注（含悄悄关注/互粉）。有 mtime 就显示日期，没有也照样说"已关注"。 */
+        var kv = h('div', { class: 'kv' },
+          h('span', { class: 'muted' }, isSelf ? '你关注你自己的时间' : '你关注 TA 的时间')
+        );
+        if (rel.mtime) {
+          kv.appendChild(h('span', { class: 'big', text: fmtTime(rel.mtime, fmt) }));
+        } else {
+          kv.appendChild(h('span', { class: 'big', text: label }));
+        }
+        kv.appendChild(h('span', { class: 'tag', text: label }));
+        kv.appendChild(h('span', { class: 'tag', text: 'mid ' + rel.mid }));
+        ui.resultSingle.appendChild(kv);
+
+        if (rel.mtime) {
+          ui.resultSingle.appendChild(h('div', { class: 'muted gap' },
+            '距今 ' + fmtAgo(rel.mtime) + '　·　时间戳 ' + rel.mtime));
+        } else {
+          ui.resultSingle.appendChild(h('div', { class: 'muted gap' },
+            '关系是「' + label + '」，但接口这次没有返回关注时间（mtime = 0），所以给不出具体日期。' +
+            '这不算"没关注"—— 旧版本正是在这里误报成未关注的。'));
+        }
+      } else if (Number(att) === 128) {
         ui.resultSingle.appendChild(h('div', { class: 'kv' },
           h('span', { class: 'big', text: '已拉黑' }),
           h('span', { class: 'tag', text: 'mid ' + rel.mid })
         ));
-      } else {
+      } else if (Number(att) === 0) {
         ui.resultSingle.appendChild(h('div', { class: 'kv' },
           h('span', { class: 'big', text: '未关注' }),
           h('span', { class: 'tag', text: 'mid ' + rel.mid })
         ));
-        ui.resultSingle.appendChild(h('div', { class: 'muted gap' }, '当前登录账号没有关注这个用户。'));
+        ui.resultSingle.appendChild(h('div', { class: 'muted gap' },
+          '当前登录账号没有关注这个用户。若你确信已关注，请核对下面这行原始数据：'));
+        ui.resultSingle.appendChild(h('div', { class: 'muted' }, relDetail(rel)));
+      } else {
+        /* 未识别的 attribute：不武断下结论（旧版本会在这里说"未关注"） */
+        ui.resultSingle.appendChild(h('div', { class: 'kv' },
+          h('span', { class: 'big', text: label }),
+          h('span', { class: 'tag', text: 'mid ' + rel.mid })
+        ));
+        ui.resultSingle.appendChild(h('div', { class: 'muted gap' },
+          'B 站返回了一个本脚本还不认识的关系状态，所以无法判断你是否关注了 TA。原始数据：'));
+        ui.resultSingle.appendChild(h('div', { class: 'muted' }, relDetail(rel)));
       }
       ui.resultSingle.hidden = false;
       GM_setValue(UI_PREFIX + 'lastInput', input);
@@ -2277,43 +2326,112 @@
    * 11. 空间页小标签
    * ======================================================================= */
 
+  /* B 站空间页是 SPA：站内点进另一个 UP 不会重新加载页面，而脚本只在页面加载时跑一次。
+     结果就是小标签停留在上一个 UP 的状态上 —— 用户看着 B 的主页，看到的却是 A 的结论，
+     表现为「明明关注了却说没关注」。所以必须监听地址变化并重查。 */
+  var chipMid = null;
+  var chipSeq = 0;          /* 防止旧请求晚到后覆盖新结果 */
+
+  function currentSpaceMid() {
+    if (location.hostname.indexOf('space.bilibili.com') < 0) return null;
+    var m = location.pathname.match(/^\/(\d+)(?=[\/?#]|$)/);
+    return m ? m[1] : null;
+  }
+
+  function removeChip() {
+    if (ui.chip && ui.chip.parentNode) ui.chip.parentNode.removeChild(ui.chip);
+    ui.chip = null;
+  }
+
+  /* 让 chip 可点击（去登录 / 复制时间戳）时，先清掉上一次的点击处理，
+     否则 SPA 切换后点击会同时触发新旧两个回调。 */
+  function bindChipClick(handler) {
+    if (ui.chip._bftClick) ui.chip.removeEventListener('click', ui.chip._bftClick);
+    ui.chip._bftClick = handler;
+    if (handler) ui.chip.addEventListener('click', handler);
+  }
+
   async function autoSpaceChip() {
     if (!cfg.get('autoSpaceChip')) return;
-    var m = location.pathname.match(/^\/(\d+)/);
-    if (!m || location.hostname.indexOf('space.bilibili.com') < 0) return;
+    var mid = currentSpaceMid();
+    if (!mid) return;
+    chipMid = mid;
+    var seq = ++chipSeq;
 
-    var mid = m[1];
-    var chip = h('div', { class: 'chip', text: '查询关注时间…' });
-    ui.wrap.appendChild(chip);
-    ui.chip = chip;
+    if (!ui.chip) ui.chip = h('div', { class: 'chip', text: '查询关注时间…' });
+    if (!ui.chip.parentNode) ui.wrap.appendChild(ui.chip);
+    var chip = ui.chip;
+    chip.style.cursor = '';
+    bindChipClick(null);
+    chip.textContent = '查询关注时间…';
 
     if (!(await ensureLogin(null).catch(function () { return false; }))) {
+      if (seq !== chipSeq) return;
       chip.textContent = '未登录 B 站 —— 点击此处去登录';
       chip.style.cursor = 'pointer';
       chip.title = '点击打开 B 站登录页';
-      chip.addEventListener('click', openLogin);
+      bindChipClick(openLogin);
       return;
     }
 
     try {
       var rel = await throttled(function () { return fetchRelation(mid, null); }, null);
-      if (rel.mtime) {
+      if (seq !== chipSeq) return;     /* 用户已经跳到别的 UP 了，这条结果作废 */
+      var att = rel.attribute;
+      var label = attrLabel(att);
+      chip.title = relDetail(rel);
+
+      if (attrFollowed(att)) {
         chip.textContent = '';
         chip.appendChild(document.createTextNode('你关注 TA 的时间：'));
-        chip.appendChild(h('b', { text: fmtTime(rel.mtime, cfg.get('timeFormat')) }));
-        chip.appendChild(document.createTextNode('（' + fmtAgo(rel.mtime) + '）'));
-        chip.title = '点击复制时间戳 ' + rel.mtime;
-        chip.style.cursor = 'pointer';
-        chip.addEventListener('click', function () {
-          var okCopy = copyText(String(rel.mtime));
-          toast(okCopy ? '已复制时间戳 ' + rel.mtime : '复制失败', okCopy ? '' : 'err');
-        });
+        chip.appendChild(h('b', {
+          text: rel.mtime ? fmtTime(rel.mtime, cfg.get('timeFormat')) : '（接口未返回）'
+        }));
+        if (rel.mtime) {
+          chip.appendChild(document.createTextNode('（' + fmtAgo(rel.mtime) + '）'));
+          chip.title = '点击复制时间戳 ' + rel.mtime + '　·　' + relDetail(rel);
+          chip.style.cursor = 'pointer';
+          bindChipClick(function () {
+            var okCopy = copyText(String(rel.mtime));
+            toast(okCopy ? '已复制时间戳 ' + rel.mtime : '复制失败', okCopy ? '' : 'err');
+          });
+        } else {
+          chip.appendChild(document.createTextNode('　（关系为「' + label + '」，但接口没给 mtime）'));
+        }
+      } else if (Number(att) === 0) {
+        chip.textContent = '你没有关注这个 UP 主。' + relDetail(rel);
       } else {
-        chip.textContent = '你没有关注这个 UP 主';
+        chip.textContent = '关系状态：' + label + '。' + relDetail(rel);
       }
     } catch (e) {
+      if (seq !== chipSeq) return;
       chip.textContent = '查询失败：' + friendlyError(e);
     }
+  }
+
+  /* 监听 SPA 站内跳转（pushState/replaceState + 前进后退），换 UP 就重查 */
+  function watchSpaceNavigation() {
+    if (!cfg.get('autoSpaceChip')) return;
+    function tick() {
+      if (!cfg.get('autoSpaceChip')) return;
+      var mid = currentSpaceMid();
+      if (!mid) {
+        if (ui.chip) removeChip();
+        chipMid = null;
+        return;
+      }
+      if (mid !== chipMid) autoSpaceChip();
+    }
+    ['pushState', 'replaceState'].forEach(function (fn) {
+      var orig = history[fn];
+      history[fn] = function () {
+        var r = orig.apply(this, arguments);
+        setTimeout(tick, 60);
+        return r;
+      };
+    });
+    window.addEventListener('popstate', function () { setTimeout(tick, 60); });
+    setInterval(tick, 1500);   /* 兜底：有些跳转不走 history API */
   }
 
   /* =========================================================================
@@ -2386,6 +2504,7 @@
     checkLogin(null)
       .catch(function () { /* ignore */ })
       .then(function () {
+        watchSpaceNavigation();
         autoSpaceChip();
         /* 顺带做一次带节流的更新检查，发现新版会在面板顶部与悬浮球上提示 */
         checkUpdate(false).catch(function () { /* ignore */ });
