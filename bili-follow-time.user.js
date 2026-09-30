@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         B站关注时间一键查询
 // @namespace    https://github.com/MolackTime/bili-follow-time
-// @version      1.2.3
+// @version      1.2.4
 // @description  查询你关注某个 UP 主的时间；导出/筛选/排序你的全部关注列表。所有参数均可在设置面板中调整。
 // @author       MolackTime
 // @license      MIT
 // @homepageURL  https://github.com/MolackTime/bili-follow-time
 // @supportURL   https://github.com/MolackTime/bili-follow-time/issues
+// @downloadURL  https://gh-proxy.com/https://raw.githubusercontent.com/MolackTime/bili-follow-time/main/bili-follow-time.user.js
+// @updateURL    https://gh-proxy.com/https://raw.githubusercontent.com/MolackTime/bili-follow-time/main/bili-follow-time.user.js
 // @match        https://*.bilibili.com/*
 // @match        https://bilibili.com/*
 // @exclude      https://api.bilibili.com/*
@@ -34,7 +36,7 @@
    * 0. 常量
    * ======================================================================= */
 
-  var VERSION = '1.2.3';
+  var VERSION = '1.2.4';
   var DEFAULT_API_BASE = 'https://api.bilibili.com';
   var CFG_PREFIX = 'bft:cfg:';
   var UI_PREFIX = 'bft:ui:';
@@ -1333,19 +1335,27 @@
     applyBallPos();
   }
 
-  function updateInstallUrl() {
-    var url = null;
+  /* 脚本头里声明的 @downloadURL / @updateURL（现指向 gh-proxy —— 无缓存，永远是最新）。
+     不用 fileURL：那是 Tampermonkey 本地存放脚本的 file:// 路径，打开它没有意义。 */
+  function declaredUpdateUrl() {
     try {
       var s = (typeof GM_info !== 'undefined' && GM_info && GM_info.script) ? GM_info.script : {};
-      url = s.downloadURL || s.updateURL || s.fileURL || null;
-    } catch (e) { /* ignore */ }
-    return url || UPDATE_SOURCES[0];
+      return s.downloadURL || s.updateURL || null;
+    } catch (e) { return null; }
+  }
+
+  /* 取址优先级：
+     ① 脚本头声明的 @downloadURL/@updateURL（gh-proxy，无缓存）
+     ② 「报出最新版本的那个源」（万一没声明，或声明地址临时不可用）
+     ③ 源列表里的第一个
+     ⚠️ 都不优先用「安装来源 URL」：jsDelivr 的分支缓存 12 小时，
+        会让人点「立即更新」又装回旧版，于是「发现新版本」反复出现。 */
+  function updateInstallUrl() {
+    return declaredUpdateUrl() || (updateInfo && updateInfo.url) || UPDATE_SOURCES[0];
   }
 
   function openUpdate() {
-    /* 优先用「报出最新版本的那个源」，而不是安装来源 URL ——
-       jsDelivr 的 12 小时缓存会让我们又装回旧版本，导致提示反复出现。 */
-    window.open((updateInfo && updateInfo.url) || updateInstallUrl(), '_blank', 'noopener');
+    window.open(updateInstallUrl(), '_blank', 'noopener');
     toast('已打开安装页 —— 点「重新安装 / 安装」即可');
   }
 
