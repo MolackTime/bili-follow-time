@@ -786,6 +786,7 @@
               showMsg(el, '已检测到登录：' +
                 (auth.uname ? auth.uname + '（' + auth.mid + '）' : 'mid ' + auth.mid) +
                 '，现在可以查询了。', 'ok');
+              flashLoggedIn();
             } else if (auth.netError) {
               showMsg(el, '无法确认登录状态（' + auth.netError + '），请检查网络后重试。', 'warn');
             } else {
@@ -1016,7 +1017,11 @@
     '.panel.pos-bl{left:20px;bottom:76px;right:auto;top:auto;}',
     '.panel.pos-tr{right:20px;top:132px;left:auto;bottom:auto;}',
     '.panel.pos-tl{left:20px;top:132px;right:auto;bottom:auto;}',
-    '.panel[hidden],.drawer[hidden],.chip[hidden],.toast[hidden]{display:none!important;}',
+    /* 任何带 hidden 的元素都必须真的隐藏。
+       ⚠️ 作者样式表里的 display:flex/block 会盖过浏览器默认的 [hidden]{display:none}，
+       所以必须显式 !important —— .loginbar 就是因为漏了这条而永远关不掉。
+       这里用 .bft [hidden] 通配，避免以后新增组件再漏。 */
+    '.bft [hidden]{display:none!important;}',
     '.p-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);}',
     '.p-head .ttl{font-weight:600;flex:1;}',
     '.p-tabs{display:flex;gap:4px;padding:8px 14px 0;}',
@@ -1107,6 +1112,9 @@
     '.loginbar .txt{flex:1;min-width:0;line-height:1.5;}',
     '.loginbar button{background:transparent;border-color:currentColor;color:inherit;padding:2px 10px;flex:none;}',
     '.loginbar button:hover{background:var(--warn);color:#fff;}',
+    '.loginbar.ok{background:#f0fbf4;color:#2e9e5b;}',
+    '.loginbar.ok button:hover{background:#2e9e5b;color:#fff;}',
+    '.bft.dark .loginbar.ok{background:#1b2c22;color:#5ddb8f;}',
     '.msg button{padding:1px 9px;font-size:11.5px;margin-left:2px;}'
   ].join('');
 
@@ -1202,6 +1210,24 @@
       } else if (uncertain) ui.selfHint.textContent = '无法确认登录状态，可点下方按钮重新检测';
       else ui.selfHint.textContent = '未登录 B 站 —— 请先登录后再拉取';
     }
+  }
+
+  /* 手动「重新检测」成功后，把横幅短暂切成绿色的「已登录：xxx」再自动收起，
+     让用户明确看到检测结果，而不是"点了没反应、横幅直接消失"。 */
+  var loginFlashTimer = 0;
+  function flashLoggedIn() {
+    if (!ui.loginBar || !auth.isLogin) { applyAuthUI(); return; }
+    ui.loginBar.hidden = false;
+    ui.loginBar.className = 'loginbar ok';
+    ui.loginText.textContent = '已登录：' +
+      (auth.uname ? auth.uname + '（mid ' + auth.mid + '）' : 'mid ' + auth.mid);
+    ui.btnGoLogin.hidden = true;
+    clearTimeout(loginFlashTimer);
+    loginFlashTimer = setTimeout(function () {
+      ui.loginBar.className = 'loginbar';
+      ui.loginBar.hidden = true;
+      ui.btnGoLogin.hidden = false;
+    }, 2800);
   }
 
   /* ---------- Toast / tooltip ---------- */
@@ -1700,14 +1726,28 @@
       h('button', {
         text: '重新检测',
         onclick: function () {
+          ui.loginBar.hidden = false;
+          ui.loginBar.className = 'loginbar';
+          ui.btnGoLogin.hidden = false;
           ui.loginText.textContent = '检测中…';
           checkLogin(null)
             .then(function () {
-              if (auth.isLogin) toast('已登录：' + (auth.uname || auth.mid));
-              else if (auth.netError) toast('无法确认登录状态：' + auth.netError, 'warn');
-              else toast('仍未检测到登录，请先在 B 站完成登录', 'warn');
+              if (auth.isLogin) {
+                flashLoggedIn();
+                toast('已登录：' + (auth.uname || auth.mid));
+              } else if (auth.netError) {
+                applyAuthUI();
+                toast('无法确认登录状态：' + auth.netError, 'warn');
+              } else {
+                applyAuthUI();
+                toast('仍未检测到登录，请先在 B 站完成登录', 'warn');
+              }
             })
-            .catch(function (e) { toast(friendlyError(e), 'err'); });
+            .catch(function (e) {
+              /* 兜底：checkLogin 万一把异常抛出来，也不能让横幅永远卡在「检测中…」 */
+              applyAuthUI();
+              toast(friendlyError(e), 'err');
+            });
         }
       })
     );
