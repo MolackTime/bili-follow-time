@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B站关注时间一键查询 · 用户脚本</title>
+<meta name="description" content="粘贴 UP 主主页链接，一键查出你是哪一天关注 TA 的。支持导出全部关注列表。所有参数可调，数据不离开浏览器。">
+<meta name="theme-color" content="#00a1d6">
+<style>
+  :root{
+    --bg:#ffffff;
+    --bg-soft:#f7f8fa;
+    --bg-code:#f2f4f7;
+    --fg:#1c1f23;
+    --fg-2:#3d434b;
+    --muted:#7b8390;
+    --line:#e6e8ec;
+    --accent:#00a1d6;
+    --accent-2:#fb7299;
+    --warn:#b7791f;
+    --warn-bg:#fffaf0;
+    --radius:12px;
+    --shadow:0 1px 2px rgba(16,24,40,.04),0 8px 24px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    font-size:.88em;background:var(--bg-code);border:1px solid var(--line);
+    border-radius:5px;padding:.1em .38em;color:var(--fg-2);
+  }
+  .wrap{max-width:920px;margin:0 auto;padding:0 20px}
+
+  /* ---------- hero ---------- */
+  .hero{
+    padding:64px 0 44px;
+    background:
+      radial-gradient(900px 320px at 15% -10%,rgba(0,161,214,.10),transparent 60%),
+      radial-gradient(700px 300px at 88% 0%,rgba(251,114,153,.10),transparent 60%);
+    border-bottom:1px solid var(--line);
+  }
+  .badge{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:12.5px;color:var(--accent);background:rgba(0,161,214,.08);
+    border:1px solid rgba(0,161,214,.25);border-radius:999px;padding:4px 12px;margin-bottom:18px;
+  }
+  h1{font-size:34px;line-height:1.25;margin:0 0 12px;letter-spacing:-.4px}
+  h1 .hl{color:var(--accent)}
+  .sub{font-size:16px;color:var(--fg-2);margin:0 0 8px;max-width:640px}
+  .sub-sm{font-size:13.5px;color:var(--muted);margin:0}
+  .btns{display:flex;gap:10px;flex-wrap:wrap;margin:26px 0 12px}
+  .btn{
+    display:inline-flex;align-items:center;gap:7px;padding:11px 20px;border-radius:9px;
+    font-size:14.5px;font-weight:600;border:1px solid transparent;cursor:pointer;
+    transition:transform .12s ease,box-shadow .12s ease,background .12s ease;
+  }
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(0,161,214,.3)}
+  .btn-primary:hover{background:#0090c2;box-shadow:0 4px 14px rgba(0,161,214,.36)}
+  .btn-ghost{background:var(--bg);color:var(--fg-2);border-color:var(--line)}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .note{font-size:13px;color:var(--muted);margin-top:6px}
+  .note b{color:var(--warn)}
+
+  /* ---------- section ---------- */
+  section{padding:46px 0;border-bottom:1px solid var(--line)}
+  section:last-of-type{border-bottom:none}
+  h2{font-size:21px;margin:0 0 6px;letter-spacing:-.2px}
+  .h2sub{color:var(--muted);font-size:13.5px;margin:0 0 24px}
+
+  /* ---------- steps ---------- */
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:16px}
+  .step{
+    background:var(--bg-soft);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px;position:relative;
+  }
+  .step .n{
+    position:absolute;top:-11px;left:18px;width:24px;height:24px;border-radius:50%;
+    background:var(--accent);color:#fff;font-size:12.5px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .step h3{font-size:15px;margin:8px 0 6px}
+  .step p{margin:0;font-size:13.5px;color:var(--fg-2)}
+
+  /* ---------- features ---------- */
+  .feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:12px}
+  .feat{border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--bg)}
+  .feat .t{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:6px}
+  .feat .d{font-size:12.8px;color:var(--muted);line-height:1.6}
+
+  /* ---------- install ---------- */
+  .install{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .irow{display:flex;gap:14px;padding:16px 18px;border-bottom:1px solid var(--line);align-items:flex-start}
+  .irow:last-child{border-bottom:none}
+  .inum{
+    flex:none;width:22px;height:22px;border-radius:50%;background:var(--bg-code);
+    color:var(--fg-2);font-size:12.5px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px;
+  }
+  .irow .body{flex:1;min-width:0}
+  .irow .body b{display:block;font-size:14.5px;margin-bottom:3px}
+  .irow .body span{font-size:13.3px;color:var(--muted)}
+  .irow .body code{word-break:break-all}
+
+  /* ---------- faq ---------- */
+  details{border:1px solid var(--line);border-radius:10px;padding:13px 16px;margin-bottom:9px;background:var(--bg)}
+  details[open]{background:var(--bg-soft)}
+  summary{cursor:pointer;font-weight:600;font-size:14.3px;list-style:none;display:flex;align-items:center;gap:8px}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"+";color:var(--accent);font-weight:700;font-size:16px;flex:none;width:14px}
+  details[open] summary::before{content:"−"}
+  details p{margin:10px 0 0;font-size:13.6px;color:var(--fg-2);padding-left:22px}
+  details p + p{margin-top:6px}
+
+  /* ---------- callout ---------- */
+  .callout{
+    background:var(--warn-bg);border:1px solid rgba(183,121,31,.3);border-radius:10px;
+    padding:14px 16px;font-size:13.3px;color:var(--warn);margin-top:20px;
+  }
+  .callout b{display:block;margin-bottom:4px}
+
+  /* ---------- footer ---------- */
+  footer{padding:32px 0 48px;color:var(--muted);font-size:12.8px;border-top:1px solid var(--line)}
+  footer p{margin:0 0 7px}
+  footer a{color:var(--muted);text-decoration:underline}
+
+  @media (max-width:560px){
+    h1{font-size:26px}
+    .hero{padding:44px 0 34px}
+    section{padding:34px 0}
+    .btn{width:100%;justify-content:center}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge">● 用户脚本 · 开源 · 数据不出浏览器</span>
+    <h1>粘贴一个链接，<br>查出你<span class="hl">哪一天</span>关注的 TA</h1>
+    <p class="sub">B 站不会告诉你关注时间是何时。<br>这个脚本把 <code>relation.mtime</code> 读出来，还你一个确切日期。</p>
+    <p class="sub-sm">支持导出全部关注列表 · 排序 / 按年筛选 / CSV·JSON 导出 · 所有参数可调</p>
+
+    <div class="btns">
+      <a class="btn btn-primary" id="btn-install" href="#">⤓ 安装用户脚本</a>
+      <a class="btn btn-ghost" id="btn-mirror" href="#">备用安装（镜像）</a>
+      <a class="btn btn-ghost" id="btn-repo" href="#" target="_blank" rel="noopener">GitHub 源码</a>
+    </div>
+    <p class="note">首次使用需先安装浏览器扩展 <b>Tampermonkey</b>（油猴）——
+      <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">官方网站</a>
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>它为什么必须跑在 B 站页面里</h2>
+    <p class="h2sub">不是偷懒不做网页版，而是浏览器的安全机制不允许。</p>
+    <div class="steps">
+      <div class="step">
+        <span class="n">1</span>
+        <h3>脚本住进 bilibili.com</h3>
+        <p>你打开 B 站页面时，脚本就在那个页面里运行。于是你的登录 Cookie、Referer、来源域名全都是「自己人」，不需要你粘贴任何东西。</p>
+      </div>
+      <div class="step">
+        <span class="n">2</span>
+        <h3>读一个只读接口</h3>
+        <p>调用 <code>x/relation</code> 与 <code>x/relation/followings</code>，取出 <code>mtime</code> 字段——那就是关注时间戳（秒级）。</p>
+      </div>
+      <div class="step">
+        <span class="n">3</span>
+        <h3>在你本地算完就结束</h3>
+        <p>排序、按年筛选、导出 CSV/JSON 全部在浏览器里完成。没有任何一台服务器收到你的数据。</p>
+      </div>
+    </div>
+    <div class="callout">
+      <b>那为什么不做成普通网页？</b>
+      B 站只允许 <code>*.bilibili.com</code> 的页面跨域读取这个接口；对第三方域名（包括 <code>github.io</code>）会直接拒绝并且不返回任何跨域许可头。同时浏览器的规则也禁止网页手动携带 Cookie。所以「纯网页版」在技术上被封死了——脚本是唯一干净的路。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>能做什么</h2>
+    <p class="h2sub">面板在 B 站页面右下角，点击即用；<code>Alt</code> + <code>B</code> 也能开关。</p>
+    <div class="feats">
+      <div class="feat"><div class="t">🔍 单个查询</div><div class="d">粘贴主页链接或直接填 mid，立刻显示「你关注 TA 的时间」，并区分未关注 / 已关注 / 已互粉 / 已拉黑。</div></div>
+      <div class="feat"><div class="t">📋 我的关注列表</div><div class="d">输入框留空即自动识别你的账号；也可以粘贴你自己的主页链接。翻页拉取全部关注，逐条列出关注时间。</div></div>
+      <div class="feat"><div class="t">👥 查 TA 的关注列表</div><div class="d">粘贴对方主页链接（或 b23.tv 短链、直接填 mid）即可查看，需对方开放关注列表权限，最多前 100 条。</div></div>
+      <div class="feat"><div class="t">🗓 按年筛选</div><div class="d">下拉选年份，比如「2015 年关注的人」，结果即时收敛。</div></div>
+      <div class="feat"><div class="t">↕ 排序与搜索</div><div class="d">点表头按关注时间 / 昵称 / 关系排序，支持昵称与 mid 关键词搜索。</div></div>
+      <div class="feat"><div class="t">⤓ 导出 CSV / JSON</div><div class="d">CSV 自带 BOM，Excel 打开不乱码；分隔符与导出字段都可勾选。</div></div>
+      <div class="feat"><div class="t">⏱ 限速可调</div><div class="d">五档预设 + 自定义间隔，实时显示「100 人约需多久」，让你自己权衡快慢。</div></div>
+      <div class="feat"><div class="t">🔔 未登录主动提醒</div><div class="d">启动即检测登录状态。未登录时悬浮球亮红色角标、面板顶部给出提示条，并附「去登录 / 重新检测」按钮。</div></div>
+      <div class="feat"><div class="t">⚙ 全参数可调</div><div class="d">每页条数、排序方式、超时、重试与退避、时间格式、主题……共 24 项，还能导出/导入配置。</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>安装（一分钟）</h2>
+    <p class="h2sub">安装一次，之后在任意 B 站页面都能用。</p>
+    <div class="install">
+      <div class="irow">
+        <span class="inum">1</span>
+        <div class="body">
+          <b>装浏览器扩展 Tampermonkey</b>
+          <span>Chrome / Edge / Firefox / Safari 都有。
+            <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">官网下载</a>
+            · <a href="https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd" target="_blank" rel="noopener">Edge 商店</a>
+            · <a href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank" rel="noopener">Chrome 商店</a>
+          </span>
+        </div>
+      </div>
+      <div class="irow">
+        <span class="inum">2</span>
+        <div class="body">
+          <b>点页面顶部的「安装用户脚本」</b>
+          <span>Tampermonkey 会弹出安装界面，点「安装」即可。若链接打不开（网络原因），改用「备用安装（镜像）」。<br>
+            也可以手动把这个地址粘贴到地址栏：<br>
+            <code id="install-url">加载中…</code>
+          </span>
+        </div>
+      </div>
+      <div class="irow">
+        <span class="inum">3</span>
+        <div class="body">
+          <b>打开任意 B 站页面开始使用</b>
+          <span>比如 <a href="https://space.bilibili.com/1643718" target="_blank" rel="noopener">space.bilibili.com/1643718</a>，
+            右下角会出现一个 ⏱ 悬浮球。点开，粘贴你想查的主页链接，回车。</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>常见问题</h2>
+    <p class="h2sub">尤其是第一个——它在解释这个项目为什么长这样。</p>
+
+    <details open>
+      <summary>为什么不能做成普通网页，非要装脚本？</summary>
+      <p>因为这个查询<b>必须带着你自己的登录状态</b>才成立——未登录时接口只返回「账号未登录」。</p>
+      <p>而浏览器的两套规则把纯网页的路堵死了：其一，B 站只对 <code>*.bilibili.com</code> 的页面返回跨域许可头，第三方域名（含 <code>github.io</code>）会被直接拒绝，网页连响应都读不到；其二，<code>Cookie</code> 属于浏览器禁止网页手动设置的请求头，网页也没办法把登录凭证「带过去」。</p>
+      <p>用户脚本运行在 bilibili.com 页面内部，天然拥有你的登录态、正确的来源域名，因此无需你粘贴任何凭证。这也是所有同类工具（包括 Bilibili-Evolved）采用的方式。</p>
+    </details>
+
+    <details>
+      <summary>如果我没登录 B 站呢？</summary>
+      <p>脚本会<b>主动提醒</b>，而不是等你查失败了才说。它启动时会先检测一次登录状态：</p>
+      <p>· 未登录时，右下角悬浮球右上角出现<b>红色 <code>!</code> 角标</b>，面板顶部（标题下方）出现黄色提示条，附「去登录 / 重新检测」两个按钮；<br>
+      · 点任何一个查询入口，都会<b>先拦截并引导你登录</b>，不会先发一堆注定失败的请求；<br>
+      · 如果接口返回未登录错误码，会被单独识别成「去登录」按钮，而不是当成普通网络错误；<br>
+      · 它还区分「确实未登录」和「网络异常、无法确认登录状态」两种情况，不会误报。</p>
+      <p>登录完成后回到 B 站页面点「重新检测」即可继续，<b>不需要刷新页面</b>。脚本不会替你登录——「去登录」只是帮你打开 B 站官方登录页，账号密码全程由你自己输入。</p>
+    </details>
+
+    <details>
+      <summary>会不会盗号？会不会把我的数据传出去？</summary>
+      <p>不会。脚本全文开源可审计。它只做两件事：向 B 站的只读接口发请求、在本地把结果渲染成表格。<b>没有任何一个服务器收到你的数据</b>，脚本也不读取、不存储、不上传你的 Cookie。</p>
+      <p>唯一写入本地的是你的设置项（保存在扩展自带的存储里），以及「上次输入的链接」。</p>
+    </details>
+
+    <details>
+      <summary>会不会被风控或者封号？</summary>
+      <p>脚本只调用只读接口，不做任何写操作（不关注、不取关、不点赞）。默认请求间隔 1.7 秒，遇到风控会自动指数退避重试，连续失败会自动中止而不会硬撞。</p>
+      <p>速度是<b>可调的</b>：想更快可以在设置里切到「快速」或「极速」，但间隔越短触发 <code>-352 风控校验失败</code> 的概率越高，界面上会给出对应警告。建议保持默认。</p>
+    </details>
+
+    <details>
+      <summary>能查别人的关注时间吗？</summary>
+      <p>能查两件事。一是「<b>你</b>关注 TA 的时间」——这个任何人都能查（用你自己的账号）。二是「<b>TA 的关注列表里每个人的关注时间</b>」——这需要对方开放了关注列表权限，而且 B 站最多只返回前 100 条。</p>
+      <p>两处输入框都支持<b>粘贴主页链接</b>（<code>space.bilibili.com/xxx</code>、<code>b23.tv</code> 短链、App 分享出来的带标题文案）、也支持直接填一串纯数字 mid，看哪个顺手用哪个。</p>
+      <p>如果对方关闭了权限，接口会返回明确的错误，脚本会告诉你原因。</p>
+    </details>
+
+    <details>
+      <summary>查出来的时间准确吗？</summary>
+      <p><code>mtime</code> 是秒级时间戳，精确到秒。但要注意一个语义问题：<b>互粉或重新关注会刷新这个时间</b>。所以它表示的是「最近一次建立关注关系的时间」，未必是你人生中第一次点开 TA 头像的那一天。</p>
+    </details>
+
+    <details>
+      <summary>觉得慢 / 想更快怎么办？</summary>
+      <p>打开面板底部的「⚙ 设置」，第一组就是「速度」。有五档预设（保守 2s / 标准 1.7s / 快速 1s / 极速 0.5s）以及自定义输入（300ms ~ 10s）。改完立即生效，旁边会实时显示「100 人约需多久」。</p>
+      <p>如果只想看最近关注的几十个人，把「查询」组里的「最多拉取条数」设成 50，就不用等全量了。</p>
+    </details>
+
+    <details>
+      <summary>还能调什么？</summary>
+      <p>设置面板里共 5 组、24 项参数，全部有 UI 入口：</p>
+      <p><b>查询</b>　每页条数、列表排序、最大翻页数、最多拉取条数、查他人上限<br>
+      <b>速度</b>　请求间隔、请求超时、最大重试轮数、两种风控的退避时长、退避随机抖动、强制后台通道<br>
+      <b>解析</b>　是否解析 b23.tv 短链、结果是否去重、API 域名<br>
+      <b>显示</b>　时间格式、CSV 是否带 BOM、分隔符、导出字段、表格每屏行数<br>
+      <b>界面</b>　面板主题、悬浮球位置、空间页自动提示、记住面板状态</p>
+      <p>配置支持一键导出 / 导入 JSON，也支持一键恢复默认。所有输入都会做范围校验，填错也不会让脚本崩溃。</p>
+    </details>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>原理与出处</h2>
+    <p class="h2sub">这套方法最早整理自我在 B 站发的一篇专栏，脚本只是把它自动化了。</p>
+    <p style="font-size:13.6px;color:var(--fg-2);margin:0 0 8px">
+      📄 原文教程：<a id="origin-link" href="ORIGIN_ARTICLE_URL" target="_blank" rel="noopener">在 B 站查看原文</a>
+    </p>
+    <p style="font-size:13.6px;color:var(--fg-2);margin:0">
+      核心接口 · <code>GET https://api.bilibili.com/x/relation?fid=&lt;mid&gt;</code> → <code>data.relation.mtime</code><br>
+      批量接口 · <code>GET https://api.bilibili.com/x/relation/followings?vmid=&lt;mid&gt;&amp;pn=1&amp;ps=50</code> → <code>data.list[].mtime</code>
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>本工具仅供个人查询自己的关注数据使用，请遵守 B 站社区规范，勿用于批量抓取或骚扰他人。</p>
+    <p>数据不经过任何服务器；脚本以 <a id="license-link" href="LICENSE" target="_blank" rel="noopener">MIT 协议</a> 开源，欢迎审计与自建。</p>
+    <p id="repo-line">仓库地址：<a id="repo-link-2" href="#" target="_blank" rel="noopener">GitHub</a></p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------
+   * 从当前页面地址推导仓库信息 —— 无需在源码里硬编码用户名。
+   *   https://<user>.github.io/<repo>/  →  user / repo
+   * 本地预览（file:// 或 localhost）时降级为相对路径。
+   * ------------------------------------------------------------------ */
+  var host = location.hostname;
+  var seg = host.split('.');
+  var isPages = /\.github\.io$/i.test(host) && seg.length >= 3;
+  var USER = isPages ? seg[0] : '';
+  var REPO = location.pathname.split('/').filter(Boolean)[0] || '';
+  var isLocal = location.protocol === 'file:' || host === 'localhost' || host === '127.0.0.1';
+
+  var FILE = 'bili-follow-time.user.js';
+  var installUrl, mirrorUrl, repoUrl;
+
+  if (isPages && REPO) {
+    installUrl = 'https://cdn.jsdelivr.net/gh/' + USER + '/' + REPO + '@main/' + FILE;
+    mirrorUrl  = 'https://gh-proxy.com/https://raw.githubusercontent.com/' + USER + '/' + REPO + '/main/' + FILE;
+    repoUrl    = 'https://github.com/' + USER + '/' + REPO;
+  } else if (isLocal) {
+    installUrl = './' + FILE;
+    mirrorUrl  = './' + FILE;
+    repoUrl    = 'https://github.com/';
+  } else {
+    /* 自定义域名等未知情况：退化为相对路径，同源必然可用 */
+    installUrl = './' + FILE;
+    mirrorUrl  = './' + FILE;
+    repoUrl    = location.origin;
+  }
+
+  function set(id, attr, val) {
+    var el = document.getElementById(id);
+    if (el && val) el.setAttribute(attr, val);
+  }
+
+  set('btn-install', 'href', installUrl);
+  set('btn-mirror', 'href', mirrorUrl);
+  set('btn-repo', 'href', repoUrl);
+  set('repo-link-2', 'href', repoUrl);
+
+  var urlEl = document.getElementById('install-url');
+  if (urlEl) urlEl.textContent = installUrl;
+
+  /* 原文链接：未填写时隐藏该项，避免出现死链 */
+  var origin = document.getElementById('origin-link');
+  if (origin && (!origin.getAttribute('href') || origin.getAttribute('href') === 'ORIGIN_ARTICLE_URL')) {
+    var p = origin.closest('p');
+    if (p) p.style.display = 'none';
+  }
+
+  /* 本地预览时给个提示 */
+  if (isLocal) {
+    var note = document.querySelector('.note');
+    if (note) note.innerHTML += '<br><span style="color:#b7791f">当前为本地预览，安装链接指向本地文件；推到 GitHub Pages 后会自动变成正确的 CDN 地址。</span>';
+  }
+})();
+</script>
+
+</body>
+</html>
