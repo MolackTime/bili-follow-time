@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站关注时间一键查询
 // @namespace    https://github.com/MolackTime/bili-follow-time
-// @version      1.1.0
+// @version      1.2.0
 // @description  查询你关注某个 UP 主的时间；导出/筛选/排序你的全部关注列表。所有参数均可在设置面板中调整。
 // @author       MolackTime
 // @license      MIT
@@ -20,6 +20,9 @@
 // @connect      app.bilibili.com
 // @connect      b23.tv
 // @connect      www.bilibili.com
+// @connect      cdn.jsdelivr.net
+// @connect      gh-proxy.com
+// @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -31,7 +34,7 @@
    * 0. 常量
    * ======================================================================= */
 
-  var VERSION = '1.1.0';
+  var VERSION = '1.2.0';
   var DEFAULT_API_BASE = 'https://api.bilibili.com';
   var CFG_PREFIX = 'bft:cfg:';
   var UI_PREFIX = 'bft:ui:';
@@ -319,7 +322,8 @@
     { key: 'speed', label: '速度' },
     { key: 'parse', label: '解析' },
     { key: 'display', label: '显示' },
-    { key: 'ui', label: '界面' }
+    { key: 'ui', label: '界面' },
+    { key: 'update', label: '更新' }
   ];
 
   var SCHEMA = [
@@ -496,6 +500,17 @@
     {
       key: 'rememberPanel', group: 'ui', label: '记住面板状态', type: 'switch', def: true,
       hint: '记住面板是否展开，以及上次输入的内容。'
+    },
+
+    /* ---- F 更新 ---- */
+    {
+      key: 'checkUpdate', group: 'update', label: '检查脚本更新', type: 'switch', def: true,
+      hint: '定期对比远端版本号，发现新版会在面板顶部提示。关闭后仍可用油猴自带的更新机制。'
+    },
+    {
+      key: 'updateCheckHours', group: 'update', label: '检查间隔', type: 'number', def: 12,
+      min: 1, max: 168, step: 1, unit: '小时',
+      hint: '两次自动检查之间的最短间隔。手动点「检查更新」不受此限制。'
     }
   ];
 
@@ -974,6 +989,162 @@
   }
 
   /* =========================================================================
+   * 5.5 更新检查
+   * ======================================================================= */
+
+  /* 三个镜像都问一遍，取「所有成功结果里的最大版本」。
+     ⚠️ jsDelivr 的分支缓存是 12 小时，刚发版时它可能仍返回旧版本 ——
+        所以必须同时问实时源（gh-proxy / raw），否则会误报"已是最新"。 */
+  var UPDATE_SOURCES = [
+    'https://cdn.jsdelivr.net/gh/MolackTime/bili-follow-time@main/bili-follow-time.user.js',
+    'https://gh-proxy.com/https://raw.githubusercontent.com/MolackTime/bili-follow-time/main/bili-follow-time.user.js',
+    'https://raw.githubusercontent.com/MolackTime/bili-follow-time/main/bili-follow-time.user.js'
+  ];
+  var LAST_CHECK_KEY = 'bft:update:lastCheck';
+  var DISMISS_KEY = 'bft:update:dismissed';
+
+  var updateInfo = null;   /* { latest } */
+
+  function parseVer(v) {
+    return String(v || '').replace(/^v/i, '').trim().split(/[.\-+]/)
+      .map(function (x) { return parseInt(x, 10) || 0; });
+  }
+
+  function cmpVer(a, b) {
+    var x = parseVer(a), y = parseVer(b);
+    var n = Math.max(x.length, y.length);
+    for (var i = 0; i < n; i++) {
+      var xi = x[i] || 0, yi = y[i] || 0;
+      if (xi > yi) return 1;
+      if (xi < yi) return -1;
+    }
+    return 0;
+  }
+
+  function extractVersion(text) {
+    var m = String(text || '').match(/^[ \t]*\/\/[ \t]*@version[ \t]+(\S+)/m);
+    return m ? m[1] : null;
+  }
+
+  function fetchTextGM(url, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      if (typeof GM_xmlhttpRequest !== 'function') { reject(new Error('无可用通道')); return; }
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: url,
+        timeout: timeoutMs || 12000,
+        onload: function (r) {
+          if (r.status >= 200 && r.status < 300) resolve(r.responseText);
+          else reject(new Error('HTTP ' + r.status));
+        },
+        onerror: function () { reject(new Error('网络错误')); },
+        ontimeout: function () { reject(new Error('超时')); }
+      });
+    });
+  }
+
+  function fetchText(url, timeoutMs) {
+    var ms = timeoutMs || 12000;
+    if (typeof fetch !== 'function') return fetchTextGM(url, ms);
+    var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, ms) : 0;
+    return fetch(url, { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+      .then(function (r) {
+        clearTimeout(timer);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .catch(function () {
+        clearTimeout(timer);
+        return fetchTextGM(url, ms);   /* 页面通道不行就换后台通道 */
+      });
+  }
+
+  function fetchLatestVersion() {
+    return Promise.all(UPDATE_SOURCES.map(function (u) {
+      return fetchText(u).then(extractVersion).catch(function () { return null; });
+    })).then(function (list) {
+      var best = null;
+      list.forEach(function (v) {
+        if (v && (!best || cmpVer(v, best) > 0)) best = v;
+      });
+      return best;
+    });
+  }
+
+  function applyUpdateUI() {
+    var hasNew = !!(updateInfo && updateInfo.latest);
+    if (ui.updateBar) {
+      if (hasNew) {
+        ui.updateBar.hidden = false;
+        ui.updateText.textContent = '发现新版本 v' + updateInfo.latest +
+          '（当前 v' + VERSION + '）。更新后需要重新加载 B 站页面才会生效。';
+      } else {
+        ui.updateBar.hidden = true;
+      }
+    }
+    if (ui.verBtn) {
+      ui.verBtn.textContent = hasNew ? ('v' + VERSION + ' → v' + updateInfo.latest) : ('v' + VERSION);
+      ui.verBtn.title = hasNew ? '点击更新' : '点击检查更新';
+      ui.verBtn.classList.toggle('hasnew', hasNew);
+    }
+    applyBallPos();
+  }
+
+  function updateInstallUrl() {
+    var url = null;
+    try {
+      var s = (typeof GM_info !== 'undefined' && GM_info && GM_info.script) ? GM_info.script : {};
+      url = s.downloadURL || s.updateURL || s.fileURL || null;
+    } catch (e) { /* ignore */ }
+    return url || UPDATE_SOURCES[0];
+  }
+
+  function openUpdate() {
+    window.open(updateInstallUrl(), '_blank', 'noopener');
+    toast('已打开安装页 —— 点「重新安装 / 安装」即可');
+  }
+
+  function dismissUpdate() {
+    if (updateInfo && updateInfo.latest) GM_setValue(DISMISS_KEY, updateInfo.latest);
+    updateInfo = null;
+    applyUpdateUI();
+    toast('已忽略该版本，下次发布仍会提示');
+  }
+
+  async function checkUpdate(manual) {
+    if (!manual && !cfg.get('checkUpdate')) return;
+
+    if (!manual) {
+      var last = Number(GM_getValue(LAST_CHECK_KEY, 0)) || 0;
+      var hours = cfg.get('updateCheckHours') || 12;
+      if (Date.now() - last < hours * 3600 * 1000) return;   /* 还没到下次检查时间 */
+    }
+    if (manual && ui.verBtn) ui.verBtn.disabled = true;
+
+    var latest = null;
+    try { latest = await fetchLatestVersion(); } catch (e) { /* 全部源都挂了 */ }
+
+    GM_setValue(LAST_CHECK_KEY, Date.now());
+    if (manual && ui.verBtn) ui.verBtn.disabled = false;
+
+    if (!latest) {
+      if (manual) toast('检查更新失败：镜像与原始地址都不可达', 'warn');
+      return;
+    }
+
+    if (cmpVer(latest, VERSION) > 0 && GM_getValue(DISMISS_KEY, '') !== latest) {
+      updateInfo = { latest: latest };
+      applyUpdateUI();
+      if (manual) toast('发现新版本 v' + latest);
+    } else {
+      updateInfo = null;
+      applyUpdateUI();
+      if (manual) toast('已是最新版本 v' + VERSION);
+    }
+  }
+
+  /* =========================================================================
    * 6. UI
    * ======================================================================= */
 
@@ -1115,6 +1286,24 @@
     '.loginbar.ok{background:#f0fbf4;color:#2e9e5b;}',
     '.loginbar.ok button:hover{background:#2e9e5b;color:#fff;}',
     '.bft.dark .loginbar.ok{background:#1b2c22;color:#5ddb8f;}',
+
+    /* 更新提示 */
+    '.updatebar{display:flex;gap:8px;align-items:center;padding:8px 14px;background:#eef8fd;',
+    'color:#0b7fa8;border-bottom:1px solid var(--line);font-size:12px;}',
+    '.updatebar .txt{flex:1;min-width:0;line-height:1.5;}',
+    '.updatebar button{background:transparent;border-color:currentColor;color:inherit;padding:2px 10px;flex:none;}',
+    '.updatebar button:hover{background:#0b7fa8;color:#fff;}',
+    '.updatebar button.primary{background:#0b7fa8;border-color:#0b7fa8;color:#fff;}',
+    '.updatebar button.primary:hover{filter:brightness(1.1);}',
+    '.bft.dark .updatebar{background:#122b36;color:#5cc8e8;}',
+    '.ball.update{box-shadow:0 0 0 2px var(--accent),var(--shadow);}',
+    '.ball.update::after{content:"↑";position:absolute;top:-3px;right:-3px;width:17px;height:17px;',
+    'border-radius:50%;background:var(--accent);color:#fff;font-size:11px;line-height:17px;',
+    'text-align:center;font-weight:700;}',
+    '.vbtn{border:none;background:transparent;color:var(--muted);padding:2px 6px;font-size:12px;}',
+    '.vbtn:hover{color:var(--accent);border-color:transparent;}',
+    '.vbtn.hasnew{color:#0b7fa8;font-weight:600;}',
+    '.bft.dark .vbtn.hasnew{color:#5cc8e8;}',
     '.msg button{padding:1px 9px;font-size:11.5px;margin-left:2px;}'
   ].join('');
 
@@ -1164,10 +1353,18 @@
     return p === 'bl' ? 'pos-bl' : p === 'tr' ? 'pos-tr' : p === 'tl' ? 'pos-tl' : 'pos-br';
   }
 
+  /* 悬浮球角标：未登录 > 有新版 > 无（只显示一个，未登录更紧急） */
+  function ballBadge() {
+    if (auth.checked && !auth.isLogin) return 'warn';
+    if (updateInfo && updateInfo.latest) return 'update';
+    return '';
+  }
+
   function applyBallPos() {
     if (!ui.ball) return;
     var p = cfg.get('ballPos');
-    ui.ball.className = 'ball ' + ballClass() + ((auth.checked && !auth.isLogin) ? ' warn' : '');
+    var badge = ballBadge();
+    ui.ball.className = 'ball ' + ballClass() + (badge ? ' ' + badge : '');
     ui.ball.hidden = (p === 'hide');
     if (ui.panel) {
       ui.panel.className = 'panel ' + ballClass();
@@ -1197,9 +1394,9 @@
 
     if (ui.ball) {
       applyBallPos();
-      ui.ball.title = notLogin
-        ? '尚未登录 B 站 —— 点击打开面板查看说明'
-        : 'B站关注时间查询（点击打开 / 关闭）';
+      if (notLogin) ui.ball.title = '尚未登录 B 站 —— 点击打开面板查看说明';
+      else if (updateInfo && updateInfo.latest) ui.ball.title = '发现新版本 v' + updateInfo.latest + ' —— 点击查看';
+      else ui.ball.title = 'B站关注时间查询（点击打开 / 关闭）';
     }
 
     if (ui.selfHint) {
@@ -1710,12 +1907,19 @@
     ui.rateHint = h('span');
     ui.btnAbort = h('button', { text: '中止', disabled: true, onclick: abortRun });
 
+    ui.verBtn = h('button', {
+      class: 'vbtn',
+      text: 'v' + VERSION,
+      title: '点击检查更新',
+      onclick: function () { checkUpdate(true); }
+    });
+
     var foot = h('div', { class: 'p-foot' },
       h('button', { text: '⚙ 设置', onclick: openSettings }),
       ui.rateHint,
       h('span', { class: 'sp' }),
       ui.btnAbort,
-      h('span', { class: 'muted', text: 'v' + VERSION })
+      ui.verBtn
     );
 
     ui.loginText = h('span', { class: 'txt' });
@@ -1752,11 +1956,19 @@
       })
     );
 
+    ui.updateText = h('span', { class: 'txt' });
+    ui.updateBar = h('div', { class: 'updatebar', hidden: true },
+      ui.updateText,
+      h('button', { class: 'primary', text: '立即更新', onclick: openUpdate }),
+      h('button', { text: '忽略', title: '忽略这个版本', onclick: dismissUpdate })
+    );
+
     p.appendChild(h('div', { class: 'p-head' },
       h('span', { class: 'ttl', text: '⏱ B站关注时间查询' }),
       h('button', { text: '✕', title: '关闭', onclick: closePanel })
     ));
     p.appendChild(ui.loginBar);
+    p.appendChild(ui.updateBar);
     p.appendChild(tabs);
     p.appendChild(body);
     p.appendChild(foot);
@@ -1788,6 +2000,7 @@
     applyTheme();
     updateRateHint();
     applyAuthUI();
+    applyUpdateUI();
     if (cfg.get('rememberPanel')) GM_setValue(UI_PREFIX + 'open', true);
     /* 未登录时每次打开面板顺手复检一次（用户可能刚登录完回来） */
     if (auth.checked && !auth.isLogin) checkLogin(null).catch(function () { /* ignore */ });
@@ -2129,17 +2342,22 @@
     if (cfg.get('rememberPanel') && GM_getValue(UI_PREFIX + 'open', false)) openPanel();
 
     /* 配置变更联动 */
-    cfg.onChange(function () {
+    cfg.onChange(function (key) {
       applyBallPos();
       applyTheme();
       updateRateHint();
       renderTable();
+      /* 挪动「更新」这两项后立刻反馈一次，不然要重启才生效，体验很怪 */
+      if ((key === 'checkUpdate' || key === 'updateCheckHours') && cfg.get('checkUpdate')) {
+        checkUpdate(true).catch(function () { /* ignore */ });
+      }
     });
 
     /* 菜单命令 */
     if (typeof GM_registerMenuCommand === 'function') {
       GM_registerMenuCommand('打开查询面板', openPanel);
       GM_registerMenuCommand('打开设置', openSettings);
+      GM_registerMenuCommand('检查脚本更新', function () { checkUpdate(true); });
       GM_registerMenuCommand('恢复默认设置', function () {
         cfg.reset();
         if (!ui.drawer.hidden) renderSettingsForm();
@@ -2158,7 +2376,11 @@
     /* 启动即检测一次登录态，未登录会在面板顶部与悬浮球上给出提醒 */
     checkLogin(null)
       .catch(function () { /* ignore */ })
-      .then(function () { autoSpaceChip(); });
+      .then(function () {
+        autoSpaceChip();
+        /* 顺带做一次带节流的更新检查，发现新版会在面板顶部与悬浮球上提示 */
+        checkUpdate(false).catch(function () { /* ignore */ });
+      });
   }
 
   /* 等待 DOM 就绪 */
