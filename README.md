@@ -8,6 +8,7 @@
 
 - 🚀 **落地页（一键安装）**：<https://molacktime.github.io/bili-follow-time/>
 - 📦 **仓库**：<https://github.com/MolackTime/bili-follow-time>
+- 📄 **原文专栏**：[《获取 b 站关注某 up 主时间的方法（包含被关注时间、以及他人的关注时间）》](https://www.bilibili.com/opus/710863915704123424)
 
 ---
 

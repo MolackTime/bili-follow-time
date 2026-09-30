@@ -367,12 +367,20 @@
   <div class="wrap">
     <h2>原理与出处</h2>
     <p class="h2sub">这套方法最早整理自我在 B 站发的一篇专栏，脚本只是把它自动化了。</p>
-    <p style="font-size:13.6px;color:var(--fg-2);margin:0 0 8px">
-      📄 原文教程：<a id="origin-link" href="ORIGIN_ARTICLE_URL" target="_blank" rel="noopener">在 B 站查看原文</a>
+    <p style="font-size:13.6px;color:var(--fg-2);margin:0 0 16px">
+      📄 原文专栏：<a id="origin-link" href="https://www.bilibili.com/opus/710863915704123424" target="_blank" rel="noopener">《获取 b 站关注某 up 主时间的方法（包含被关注时间、以及他人的关注时间）。》</a>
     </p>
+    <p style="font-size:13.6px;color:var(--fg-2);margin:0 0 6px"><b>① 单个关系</b> —— 查「你关注 TA 的时间」</p>
+    <p style="font-size:13.6px;color:var(--fg-2);margin:0 0 14px">
+      <code>GET https://api.bilibili.com/x/relation?fid=&lt;mid&gt;</code><br>
+      → <code>data.relation.mtime</code>（秒级时间戳）· <code>data.relation.attribute</code>（0 未关注 / 2 已关注 / 6 已互粉 / 128 已拉黑）
+    </p>
+    <p style="font-size:13.6px;color:var(--fg-2);margin:0 0 6px"><b>② 关注列表</b> —— 拉全量 / 查他人</p>
     <p style="font-size:13.6px;color:var(--fg-2);margin:0">
-      核心接口 · <code>GET https://api.bilibili.com/x/relation?fid=&lt;mid&gt;</code> → <code>data.relation.mtime</code><br>
-      批量接口 · <code>GET https://api.bilibili.com/x/relation/followings?vmid=&lt;mid&gt;&amp;pn=1&amp;ps=50</code> → <code>data.list[].mtime</code>
+      <code>GET https://api.bilibili.com/x/relation/followings?vmid=&lt;mid&gt;&amp;pn=1&amp;ps=50</code><br>
+      → <code>data.list[].mtime</code>　自己 = 全量分页；他人 = <b>只给前 100 条，且超限时静默返回空列表</b><br>
+      <code>GET https://app.biliapi.net/x/v2/relation/followings?vmid=&lt;mid&gt;&amp;pn=1&amp;ps=50</code><br>
+      → <code>data.list[].mtime</code>　他人 = 前 5 页共 250 条；第 6 页返回 <code>22007</code>
     </p>
   </div>
 </section>
@@ -577,11 +585,14 @@
       .catch(function () { /* 跨域 / 离线：静默，避免误报 */ });
   })();
 
-  /* 原文链接：未填写时隐藏该项，避免出现死链 */
+  /* 原文链接若被清空（比如 fork 后误删）就隐藏整行，避免出现死链 */
   var origin = document.getElementById('origin-link');
-  if (origin && (!origin.getAttribute('href') || origin.getAttribute('href') === 'ORIGIN_ARTICLE_URL')) {
-    var p = origin.closest('p');
-    if (p) p.style.display = 'none';
+  if (origin) {
+    var oh = origin.getAttribute('href') || '';
+    if (!oh || oh === '#' || oh.indexOf('ORIGIN_') === 0) {
+      var p = origin.closest('p');
+      if (p) p.style.display = 'none';
+    }
   }
 
   /* 本地预览时给个提示 */
