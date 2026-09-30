@@ -6,6 +6,9 @@
 
 一个 Tampermonkey（油猴）用户脚本 + 一个 GitHub Pages 落地页。
 
+- 🚀 **落地页（一键安装）**：<https://molacktime.github.io/bili-follow-time/>
+- 📦 **仓库**：<https://github.com/MolackTime/bili-follow-time>
+
 ---
 
 ## 安装
@@ -15,7 +18,7 @@
 1. 安装浏览器扩展 [Tampermonkey](https://www.tampermonkey.net/)
    （[Edge 商店](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) ·
    [Chrome 商店](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)）
-2. 打开本仓库的 GitHub Pages 落地页，点「安装用户脚本」
+2. 打开落地页 <https://molacktime.github.io/bili-follow-time/>，点「安装用户脚本」
 3. 打开任意 B 站页面（例如 <https://space.bilibili.com/1643718>），右下角出现 ⏱ 悬浮球，点开即用
 
 ### 方式二：直接装脚本
@@ -23,13 +26,13 @@
 把下面地址粘到浏览器地址栏，Tampermonkey 会自动弹出安装界面：
 
 ```
-https://cdn.jsdelivr.net/gh/<你的用户名>/<仓库名>@main/bili-follow-time.user.js
+https://cdn.jsdelivr.net/gh/MolackTime/bili-follow-time@main/bili-follow-time.user.js
 ```
 
 国内若 jsDelivr 缓存未刷新或不通，用镜像：
 
 ```
-https://gh-proxy.com/https://raw.githubusercontent.com/<你的用户名>/<仓库名>/main/bili-follow-time.user.js
+https://gh-proxy.com/https://raw.githubusercontent.com/MolackTime/bili-follow-time/main/bili-follow-time.user.js
 ```
 
 ---

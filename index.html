@@ -346,6 +346,16 @@
   var isLocal = location.protocol === 'file:' || host === 'localhost' || host === '127.0.0.1';
 
   var FILE = 'bili-follow-time.user.js';
+
+  /* GitHub Pages 会把域名强制小写，所以 seg[0] 拿到的是 "molacktime"。
+     jsDelivr 的 owner 大小写不敏感（已实测），但 raw 镜像路径不保证，
+     因此这里按大小写无关比对，命中本仓库就换回规范写法，保证链接两种通道都稳。
+     如果是别人 fork 后的站点，则保持其自身用户名不变。 */
+  var CANONICAL_OWNER = 'MolackTime';
+  if (isPages && USER && USER.toLowerCase() === CANONICAL_OWNER.toLowerCase()) {
+    USER = CANONICAL_OWNER;
+  }
+
   var installUrl, mirrorUrl, repoUrl;
 
   if (isPages && REPO) {
@@ -355,12 +365,13 @@
   } else if (isLocal) {
     installUrl = './' + FILE;
     mirrorUrl  = './' + FILE;
-    repoUrl    = 'https://github.com/';
+    repoUrl    = 'https://github.com/' + CANONICAL_OWNER + '/' + (REPO || 'bili-follow-time');
   } else {
-    /* 自定义域名等未知情况：退化为相对路径，同源必然可用 */
+    /* 自定义域名等未知情况：安装链接退化为相对路径（同源必然可用），
+       仓库链接回落到已知的正式仓库 */
     installUrl = './' + FILE;
     mirrorUrl  = './' + FILE;
-    repoUrl    = location.origin;
+    repoUrl    = 'https://github.com/' + CANONICAL_OWNER + '/' + (REPO || 'bili-follow-time');
   }
 
   function set(id, attr, val) {

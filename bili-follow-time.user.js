@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         B站关注时间一键查询
-// @namespace    bili-follow-time
+// @namespace    https://github.com/MolackTime/bili-follow-time
 // @version      1.0.0
 // @description  查询你关注某个 UP 主的时间；导出/筛选/排序你的全部关注列表。所有参数均可在设置面板中调整。
-// @author       bili-follow-time
+// @author       MolackTime
 // @license      MIT
-// @homepageURL  https://github.com/
+// @homepageURL  https://github.com/MolackTime/bili-follow-time
+// @supportURL   https://github.com/MolackTime/bili-follow-time/issues
 // @match        https://*.bilibili.com/*
 // @match        https://bilibili.com/*
 // @exclude      https://api.bilibili.com/*
