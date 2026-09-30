@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站关注时间一键查询
 // @namespace    https://github.com/MolackTime/bili-follow-time
-// @version      1.2.2
+// @version      1.2.3
 // @description  查询你关注某个 UP 主的时间；导出/筛选/排序你的全部关注列表。所有参数均可在设置面板中调整。
 // @author       MolackTime
 // @license      MIT
@@ -34,7 +34,7 @@
    * 0. 常量
    * ======================================================================= */
 
-  var VERSION = '1.2.2';
+  var VERSION = '1.2.3';
   var DEFAULT_API_BASE = 'https://api.bilibili.com';
   var CFG_PREFIX = 'bft:cfg:';
   var UI_PREFIX = 'bft:ui:';
@@ -147,8 +147,99 @@
 
   /* 给用户看的原始值，便于在"结果不符预期"时自证 */
   function relDetail(rel) {
-    return '接口返回：attribute=' + (rel.attribute === undefined ? '?' : rel.attribute) +
+    var s = '接口返回：attribute=' +
+      (rel.attribute === undefined || rel.attribute === null ? '(缺失)' : rel.attribute) +
       '，mtime=' + (rel.mtime || 0) + '，mid ' + rel.mid;
+    if (rel.conflict && rel.via) {
+      s += '　⚠️ 两个接口结论不一致：' + rel.via.map(function (x) {
+        return x.name + ' → ' + (x.ok ? ('attribute=' + (x.attribute === null ? '(缺失)' : x.attribute)) : ('失败 ' + (x.error || '')));
+      }).join('；');
+    }
+    return s;
+  }
+
+  /* 完整诊断文本：一键复制发给开发者，不用再靠猜 */
+  function relDiagText(rel) {
+    var L = [];
+    L.push('=== B站关注时间脚本 · 关系查询诊断 ===');
+    L.push('时间: ' + new Date().toLocaleString());
+    L.push('脚本版本: v' + VERSION);
+    L.push('页面: ' + location.href);
+    L.push('目标 mid: ' + rel.mid);
+    L.push('判定结果: ' + attrLabel(rel.attribute) +
+      '（attribute=' + (rel.attribute === undefined || rel.attribute === null ? '(缺失)' : rel.attribute) +
+      ', mtime=' + (rel.mtime || 0) + '）');
+    if (rel.conflict) L.push('⚠️ 两个接口结论冲突 —— 已按"取已关注"处理');
+    L.push('');
+    L.push('--- 各接口原始返回 ---');
+    (rel.via || []).forEach(function (x) {
+      L.push('· ' + x.name + ' → ' + (x.ok
+        ? ('attribute=' + (x.attribute === null ? '(缺失)' : x.attribute) + ', mtime=' + x.mtime)
+        : ('失败: ' + (typeof x.code === 'number' ? ('code ' + x.code + ' ') : '') + (x.error || ''))));
+      if (x.raw) {
+        var t = JSON.stringify(x.raw);
+        if (t.length > 1200) t = t.slice(0, 1200) + ' …(已截断)';
+        L.push('    raw: ' + t);
+      }
+    });
+    L.push('');
+    L.push('UA: ' + navigator.userAgent);
+    return L.join('\n');
+  }
+
+  /* 「结果不符预期」时的逃生口：一键把诊断信息复制走 */
+  function diagBtn(rel) {
+    return h('button', {
+      class: 'mini',
+      text: '⧉ 复制诊断信息',
+      title: '复制两个接口的原始返回、脚本版本、当前页面等，便于反馈问题',
+      onclick: function () {
+        var okCopy = copyText(relDiagText(rel));
+        toast(okCopy ? '诊断信息已复制 —— 粘贴发给开发者即可' : '复制失败', okCopy ? '' : 'err');
+      }
+    });
+  }
+
+  /* 终审按钮：两个关系接口都说"未关注"时，去自己的关注列表里找一次 */
+  function verifyBtn(mid) {
+    return h('button', {
+      class: 'mini',
+      text: '↻ 去我的关注列表里核实',
+      title: '直接翻你自己的关注列表找这个 mid —— 这是最准的真值来源',
+      onclick: async function () {
+        var btn = this;
+        if (btn.disabled) return;
+        var old = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '正在翻你的关注列表…';
+        try {
+          var r = await verifyByFollowings(mid, function (p) {
+            btn.textContent = '翻到第 ' + p.page + ' 页 · 已扫 ' + p.got + ' 条' +
+              (p.total ? (' / 共 ' + p.total) : '') + '…';
+          }, null);
+          if (r.found) {
+            var it = r.item || {};
+            var m = Number(it.mtime) || 0;
+            showMsg(ui.msgSingle,
+              '在你的关注列表里【找到了】mid ' + mid + '：attribute=' + it.attribute +
+              (m ? ('，关注时间 ' + fmtTime(m, cfg.get('timeFormat')) + '，时间戳 ' + m)
+                 : '（列表里也没给 mtime）') +
+              '　→ 说明关系接口刚才返回的数据有误，请把诊断信息发我。', 'ok');
+          } else {
+            showMsg(ui.msgSingle,
+              '已扫描 ' + r.scanned + ' 条关注' +
+              (r.total ? ('（你共关注 ' + r.total + ' 个账号）') : '') +
+              '，其中【没有】mid ' + mid + '。基本可以确认：当前登录账号没有关注它。' +
+              '（再核对一下浏览器登录的是哪个账号、以及是不是同一个 UP）', 'warn');
+          }
+        } catch (e) {
+          showMsg(ui.msgSingle, friendlyError(e), 'err');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = old;
+        }
+      }
+    });
   }
 
   function fmtDuration(sec) {
@@ -689,6 +780,12 @@
         headers: (opts.referer === false) ? {} : { Referer: 'https://www.bilibili.com/' },
         timeout: cfg.get('timeout'),
         responseType: 'json',
+        /* ⚠️ 必须显式声明带凭证。
+           后台通道默认【不发送 Cookie】，而 B 站几乎所有业务接口都要靠 SESSDATA
+           才认得出"你是谁"。不带的话，要么直接 -101「账号未登录」，
+           要么更糟 —— 静默返回一份"匿名视角"的数据（比如关系全是未关注）。
+           用 opts.credentials === false 可对确实不需要登录态的请求关掉。 */
+        withCredentials: opts.credentials !== false,
         onload: function (r) {
           try {
             var d = (r.response && typeof r.response === 'object') ? r.response : JSON.parse(r.responseText);
@@ -867,19 +964,102 @@
     return auth.isLogin ? auth.mid : null;
   }
 
-  async function fetchRelation(fid, signal) {
-    var j = await apiGet('/x/relation', { fid: fid }, { signal: signal });
-    if (!j) throw new Error('空响应');
-    if (j.code === 0) {
-      var rel = (j.data && j.data.relation) || {};
-      return {
-        mid: String(fid),
-        mtime: rel.mtime || 0,
-        attribute: rel.attribute || 0,
-        beRelation: j.data ? j.data.be_relation : null
-      };
+  /* ---- 关系查询：双接口交叉验证 ----
+     背景（2026-09-30 用户反馈）：在某 UP 主页显示 attribute=0（"未关注"），但实际已关注。
+     实测两个接口在【无有效凭证】时都返回 -101「账号未登录」而不是 0 ——
+     也就是说 attribute=0 是"带着登录态"时服务端给出的结论，那就必须能区分：
+       (a) 真的没关注　vs　(b) 某个接口返回了异常/降级数据
+     做法：主接口拿到的结论若是"不是已关注"，再用备用接口复核一次。
+       · 主接口  /x/relation?fid=                 （旧接口，一直沿用）
+       · 备用接口 /x/web-interface/relation?mid=   （Bilibili-Evolved 采用，经大量用户验证）
+     已关注时【零额外请求】；两者冲突时取"已关注"，并明确把冲突告诉用户。 */
+  var REL_PROBES = [
+    /* 主接口用 web-interface 版：Bilibili-Evolved 等成熟工具采用它，长期线上验证；
+       旧的 /x/relation GET 版保留作备用（本脚本一直用它，兼容老行为）。 */
+    { name: '/x/web-interface/relation', path: '/x/web-interface/relation', param: 'mid' },
+    { name: '/x/relation', path: '/x/relation', param: 'fid' }
+  ];
+
+  function relationOf(j, fid) {
+    var rel = (j && j.data && j.data.relation) || null;
+    if (!rel) return null;          /* 结构不符 → 交给上层报"结构异常"，不要静默当 0 */
+    var att = rel.attribute;
+    return {
+      mid: String(fid),
+      mtime: Number(rel.mtime) || 0,
+      /* attribute 缺失时保留 null 而不是塞 0 —— 0 是"未关注"的有效取值，
+         拿它当兜底会把"没这个字段"伪装成"确认未关注"。 */
+      attribute: (att === undefined || att === null || att === '') ? null : Number(att),
+      beRelation: (j.data && j.data.be_relation) || null
+    };
+  }
+
+  function relDiag(p) {
+    var o = { name: p.name, ok: !!p.ok };
+    if (p.ok) { o.attribute = p.attribute; o.mtime = p.mtime; }
+    else { o.error = p.error || '?'; if (typeof p.code === 'number') o.code = p.code; }
+    if (p.raw) o.raw = p.raw;
+    return o;
+  }
+
+  async function probeRelation(p, fid, signal) {
+    var out = { name: p.name, ok: false };
+    try {
+      var params = {};
+      params[p.param] = fid;
+      var j = await apiGet(p.path, params, { signal: signal });
+      if (!j) { out.error = '空响应'; return out; }
+      out.code = j.code;
+      if (j.code !== 0) { out.error = j.message || ('code ' + j.code); out.raw = j; return out; }
+      var rel = relationOf(j, fid);
+      if (!rel) { out.error = '响应里没有 data.relation'; out.raw = j; return out; }
+      out.ok = true;
+      out.attribute = rel.attribute;
+      out.mtime = rel.mtime;
+      out.rel = rel;
+      out.raw = j;
+      return out;
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
+      out.error = (e && e.message) ? e.message : String(e);
+      if (e && typeof e.code === 'number') out.code = e.code;
+      return out;
     }
-    throw new ApiError(j.code, j.message);
+  }
+
+  async function fetchRelation(fid, signal) {
+    var first = await probeRelation(REL_PROBES[0], fid, signal);
+
+    /* 主接口明确"已关注 / 悄悄关注 / 互粉" → 直接用，不再多发请求 */
+    if (first.ok && attrFollowed(first.attribute)) {
+      first.rel.via = [relDiag(first)];
+      first.rel.conflict = false;
+      return first.rel;
+    }
+
+    /* 主接口给出"未关注 / 状态未知"，或干脆失败了 → 换另一个接口复核 */
+    var second = await probeRelation(REL_PROBES[1], fid, signal);
+    var via = [relDiag(first), relDiag(second)];
+
+    /* 两条都没拿到可用数据：按主接口的错误抛出，保持原有错误处理链路 */
+    if (!first.ok && !second.ok) {
+      if (typeof first.code === 'number' && first.code !== 0) throw new ApiError(first.code, first.error);
+      throw new Error('两个关系接口都没能查到：' +
+        first.name + ' → ' + (first.error || '?') + '；' +
+        second.name + ' → ' + (second.error || '?'));
+    }
+
+    var chosen, conflict = false;
+    if (first.ok && second.ok) {
+      conflict = String(first.attribute) !== String(second.attribute);
+      /* 冲突时取"已关注"的那个 —— 宁可显示已关注，也不能误报未关注 */
+      chosen = (attrFollowed(second.attribute) && !attrFollowed(first.attribute)) ? second.rel : first.rel;
+    } else {
+      chosen = first.ok ? first.rel : second.rel;
+    }
+    chosen.via = via;
+    chosen.conflict = conflict;
+    return chosen;
   }
 
   /* 关注列表两个接口的真实上限（2026-09-30 实测）：
@@ -902,6 +1082,8 @@
     var signal = opts.signal;
     var orderType = cfg.get('orderType');
     var limit = cfg.get('limitCount');
+    /* 早停目标：用于"去关注列表里核实某个 mid 在不在" —— 命中就停，不白翻后面几十页 */
+    var stopAtMid = opts.stopAtMid ? String(opts.stopAtMid) : null;
 
     var selfMid = opts.selfMid;
     if (selfMid === undefined) {
@@ -959,6 +1141,12 @@
         collected = collected.concat(list);
         onProgress({ page: pn, got: collected.length, total: total, isSelf: isSelf });
 
+        /* 早停：命中目标 mid 就收工（"去关注列表核实"用） */
+        if (stopAtMid && list.some(function (it) { return String(it.mid) === stopAtMid; })) {
+          stopped = 'found';
+          break;
+        }
+
         /* 到顶了。区分是"用户自己设的条数上限"还是"接口硬上限" */
         if (collected.length >= hardCap) {
           stopped = (hardCap < byEndpoint) ? 'cap' : 'endpoint';
@@ -1006,6 +1194,32 @@
       endpoint: useApp ? 'app' : 'web',
       endpointMax: isSelf ? null : spec.othersMax,
       stopped: stopped
+    };
+  }
+
+  /* ---- 终审兜底：直接去【你自己的关注列表】里找这个 mid ----
+     两个关系接口都说"未关注"时，列表是最后一个真值来源 ——
+     列表里每一条本来就带 attribute 和 mtime，是你账号下最直接的记录。
+     只在用户手动点击时执行（要翻页，耗时与关注数成正比），命中即停。 */
+  async function verifyByFollowings(mid, onProgress, signal) {
+    var selfMid = await getSelfMid(signal);
+    if (!selfMid) throw new Error('未登录，无法拉取你的关注列表');
+    var res = await fetchFollowings(selfMid, {
+      signal: signal,
+      selfMid: selfMid,
+      stopAtMid: mid,
+      onProgress: onProgress
+    });
+    var hit = null;
+    (res.list || []).forEach(function (it) {
+      if (String(it.mid) === String(mid)) hit = it;
+    });
+    return {
+      found: !!hit,
+      item: hit,
+      scanned: (res.list || []).length,
+      total: res.total,
+      stopped: res.stopped
     };
   }
 
@@ -1196,6 +1410,9 @@
     'button.primary{background:var(--accent);border-color:var(--accent);color:#fff;}',
     'button.primary:hover{filter:brightness(1.08);color:#fff;}',
     'button:disabled{opacity:.5;cursor:not-allowed;}',
+    /* 结果区里的辅助按钮（复制诊断 / 去关注列表核实）：更小更轻，不抢主操作 */
+    'button.mini{font-size:11.5px;padding:2px 9px;line-height:1.6;color:var(--muted);}',
+    'button.mini:hover{color:var(--accent);border-color:var(--accent);}',
     'input,select{font-family:inherit;font-size:inherit;color:var(--fg);background:var(--bg);',
     'border:1px solid var(--line);border-radius:6px;padding:4px 8px;outline:none;}',
     'input:focus,select:focus{border-color:var(--accent);}',
@@ -1728,19 +1945,25 @@
             '关系是「' + label + '」，但接口这次没有返回关注时间（mtime = 0），所以给不出具体日期。' +
             '这不算"没关注"—— 旧版本正是在这里误报成未关注的。'));
         }
-      } else if (Number(att) === 128) {
+      } else if (att === 128) {
         ui.resultSingle.appendChild(h('div', { class: 'kv' },
           h('span', { class: 'big', text: '已拉黑' }),
           h('span', { class: 'tag', text: 'mid ' + rel.mid })
         ));
-      } else if (Number(att) === 0) {
+      } else if (att === 0) {
         ui.resultSingle.appendChild(h('div', { class: 'kv' },
           h('span', { class: 'big', text: '未关注' }),
           h('span', { class: 'tag', text: 'mid ' + rel.mid })
         ));
         ui.resultSingle.appendChild(h('div', { class: 'muted gap' },
-          '当前登录账号没有关注这个用户。若你确信已关注，请核对下面这行原始数据：'));
+          rel.conflict
+            ? '⚠️ 两个接口结论不一致（已在下方标出）。这通常是接口返回了异常数据，请把诊断信息发我。'
+            : '两个接口都查过了，结论一致：当前登录账号没有关注这个用户。'));
+        ui.resultSingle.appendChild(h('div', { class: 'muted gap' },
+          '若你确信已关注，请先确认两点：① 浏览器当前登录的是不是你自己的账号（点头像看昵称）；' +
+          '② 关注的是不是同一个 UP（同名 / 小号很常见）。'));
         ui.resultSingle.appendChild(h('div', { class: 'muted' }, relDetail(rel)));
+        ui.resultSingle.appendChild(h('div', { class: 'row gap' }, diagBtn(rel), verifyBtn(rel.mid)));
       } else {
         /* 未识别的 attribute：不武断下结论（旧版本会在这里说"未关注"） */
         ui.resultSingle.appendChild(h('div', { class: 'kv' },
@@ -1750,6 +1973,7 @@
         ui.resultSingle.appendChild(h('div', { class: 'muted gap' },
           'B 站返回了一个本脚本还不认识的关系状态，所以无法判断你是否关注了 TA。原始数据：'));
         ui.resultSingle.appendChild(h('div', { class: 'muted' }, relDetail(rel)));
+        ui.resultSingle.appendChild(h('div', { class: 'row gap' }, diagBtn(rel)));
       }
       ui.resultSingle.hidden = false;
       GM_setValue(UI_PREFIX + 'lastInput', input);
@@ -2398,10 +2622,21 @@
         } else {
           chip.appendChild(document.createTextNode('　（关系为「' + label + '」，但接口没给 mtime）'));
         }
-      } else if (Number(att) === 0) {
-        chip.textContent = '你没有关注这个 UP 主。' + relDetail(rel);
+      } else if (att === 0) {
+        chip.textContent = (rel.conflict ? '⚠️ 两个接口结论不一致。' : '你没有关注这个 UP 主。') +
+          relDetail(rel) + '　（点这里复制诊断信息）';
+        chip.style.cursor = 'pointer';
+        bindChipClick(function () {
+          var okCopy = copyText(relDiagText(rel));
+          toast(okCopy ? '诊断信息已复制' : '复制失败', okCopy ? '' : 'err');
+        });
       } else {
-        chip.textContent = '关系状态：' + label + '。' + relDetail(rel);
+        chip.textContent = '关系状态：' + label + '。' + relDetail(rel) + '　（点这里复制诊断信息）';
+        chip.style.cursor = 'pointer';
+        bindChipClick(function () {
+          var okCopy = copyText(relDiagText(rel));
+          toast(okCopy ? '诊断信息已复制' : '复制失败', okCopy ? '' : 'err');
+        });
       }
     } catch (e) {
       if (seq !== chipSeq) return;
