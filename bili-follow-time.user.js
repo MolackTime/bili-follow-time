@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站关注时间一键查询
 // @namespace    https://github.com/MolackTime/bili-follow-time
-// @version      1.0.0
+// @version      1.1.0
 // @description  查询你关注某个 UP 主的时间；导出/筛选/排序你的全部关注列表。所有参数均可在设置面板中调整。
 // @author       MolackTime
 // @license      MIT
@@ -16,6 +16,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @connect      api.bilibili.com
+// @connect      app.biliapi.net
+// @connect      app.bilibili.com
 // @connect      b23.tv
 // @connect      www.bilibili.com
 // @run-at       document-idle
@@ -29,7 +31,7 @@
    * 0. 常量
    * ======================================================================= */
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var DEFAULT_API_BASE = 'https://api.bilibili.com';
   var CFG_PREFIX = 'bft:cfg:';
   var UI_PREFIX = 'bft:ui:';
@@ -257,7 +259,8 @@
     {
       key: 'ps', group: 'query', label: '每页条数', type: 'number', def: 50,
       min: 10, max: 50, step: 5,
-      hint: '接口硬上限 50。调小不会更快，反而增加请求次数与风控概率。'
+      hint: '接口硬上限 50。调小不会更快，反而增加请求次数与风控概率。' +
+        '注意：查他人时若用「兼容接口」，ps 会被服务端固定为 50，此项对它无效。'
     },
     {
       key: 'orderType', group: 'query', label: '列表排序', type: 'select', def: '',
@@ -275,9 +278,18 @@
       hint: '0 = 不限。只想看「最近 N 个关注」时填 N。'
     },
     {
-      key: 'othersCap', group: 'query', label: '查他人条数上限', type: 'number', def: 100,
-      min: 1, max: 100, step: 10,
-      hint: 'B 站服务端硬上限 100 条，设置超过 100 无效。'
+      key: 'othersEndpoint', group: 'query', label: '查他人用哪个接口', type: 'select', def: 'app',
+      options: [
+        { value: 'app', label: '兼容接口（上限 250 条）' },
+        { value: 'web', label: '标准接口（上限 100 条）' }
+      ],
+      hint: '兼容接口可翻 5 页共 250 条，读公开关注列表甚至无需登录；标准接口只有前 100 条，' +
+        '超过后接口会静默返回空列表（code 仍是 0，很容易误以为对方只关注了 100 人）。'
+    },
+    {
+      key: 'othersCap', group: 'query', label: '查他人条数上限', type: 'number', def: 250,
+      min: 1, max: 250, step: 10,
+      hint: '实际上限受接口限制：兼容接口 250 条、标准接口 100 条。设超了会被自动夹紧。'
     },
 
     /* ---- B 速度与网络 ---- */
@@ -532,8 +544,12 @@
   ApiError.prototype = Object.create(Error.prototype);
   ApiError.prototype.constructor = ApiError;
 
-  function buildUrl(path, params) {
-    var base = String(cfg.get('apiBase') || DEFAULT_API_BASE).replace(/\/+$/, '');
+  /* 兼容接口所在的域名。注意：它【不返回任何 CORS 头】，
+     所以页面 fetch 必被浏览器拦下，只能走 GM 后台通道。 */
+  var APP_BASE = 'https://app.biliapi.net';
+
+  function buildUrl(path, params, baseOverride) {
+    var base = String(baseOverride || cfg.get('apiBase') || DEFAULT_API_BASE).replace(/\/+$/, '');
     var url;
     try {
       url = new URL(base + path);
@@ -561,7 +577,7 @@
       var req = GM_xmlhttpRequest({
         method: 'GET',
         url: url,
-        headers: { Referer: 'https://www.bilibili.com/' },
+        headers: (opts.referer === false) ? {} : { Referer: 'https://www.bilibili.com/' },
         timeout: cfg.get('timeout'),
         responseType: 'json',
         onload: function (r) {
@@ -591,10 +607,12 @@
 
   async function apiGet(path, params, opts) {
     opts = opts || {};
-    var url = buildUrl(path, params);
+    var url = buildUrl(path, params, opts.base);
     var signal = opts.signal;
 
-    if (!cfg.get('forceGM') && typeof fetch === 'function') {
+    /* opts.forceGM：该域名没有 CORS 头，或需要绕过页面限制时，直接走后台通道，
+       免得白白多一次注定失败的请求。 */
+    if (!opts.forceGM && !cfg.get('forceGM') && typeof fetch === 'function') {
       try {
         var res = await fetch(url, {
           method: 'GET',
@@ -728,6 +746,7 @@
     if (c === -799) return '请求过快（-799）。请在设置里把「请求间隔」调大。';
     if (c === -400) return '请求错误（-400）。接口参数可能已变化。';
     if (c === 22115 || c === 22118) return '对方未开放关注列表，无法查询。';
+    if (c === 22007) return '已到兼容接口的翻页上限（最多前 5 页 / 250 条）。';
     if (c === 22001) return '目标用户不存在或已被封禁。';
     if (typeof c === 'number') return (e.message || '接口错误') + '（' + c + '）';
     return e.message || String(e);
@@ -753,15 +772,26 @@
     throw new ApiError(j.code, j.message);
   }
 
+  /* 关注列表两个接口的真实上限（2026-09-30 实测）：
+     ┌ 标准接口 /x/relation/followings
+     │   自己 = 全量可分页；他人 = 前 100 条。
+     │   ⚠️ 超过 100 条时它【静默返回空列表，code 仍是 0】，很容易让人误以为对方只关注了 100 人。
+     └ 兼容接口 /x/v2/relation/followings（域名 app.biliapi.net）
+         自己 = 全量；他人 = 前 5 页，即 ps(50) × 5 = 250 条；
+         第 6 页起返回 code 22007「限制只访问前5页」。
+         ⚠️ ps 被服务端钉死在 50（传 100/250/500 都只回 50）；
+         ⚠️ 该域名【不返回任何 CORS 头】，页面 fetch 必被拦，只能走 GM 后台通道。 */
+  var ENDPOINT = {
+    web: { path: '/x/relation/followings', base: undefined, psFixed: 0, othersMax: 100, maxPages: Infinity, forceGM: false },
+    app: { path: '/x/v2/relation/followings', base: APP_BASE, psFixed: 50, othersMax: 250, maxPages: 5, forceGM: true }
+  };
+
   async function fetchFollowings(vmid, opts) {
     opts = opts || {};
     var onProgress = opts.onProgress || function () {};
     var signal = opts.signal;
-    var ps = cfg.get('ps');
     var orderType = cfg.get('orderType');
-    var maxPages = cfg.get('maxPages');
     var limit = cfg.get('limitCount');
-    var cap = cfg.get('othersCap');
 
     var selfMid = opts.selfMid;
     if (selfMid === undefined) {
@@ -769,9 +799,28 @@
     }
     var isSelf = !!selfMid && String(vmid) === String(selfMid);
 
-    var hardCap = isSelf
-      ? (limit > 0 ? limit : Infinity)
-      : Math.min(cap, limit > 0 ? limit : Infinity);
+    /* 自己的关注一律走标准接口 —— 它给全量，没有 250 的封顶。
+       查他人时才按设置选接口。 */
+    var spec = (!isSelf && cfg.get('othersEndpoint') === 'app') ? ENDPOINT.app : ENDPOINT.web;
+    var useApp = (spec === ENDPOINT.app);
+
+    var ps = spec.psFixed || cfg.get('ps');
+
+    /* 三个约束取最小：接口自身上限、用户设的"查他人上限"、"最多拉取条数" */
+    var byEndpoint = isSelf ? Infinity : spec.othersMax;
+    var cap = Math.min(byEndpoint, isSelf ? Infinity : cfg.get('othersCap'));
+    if (limit > 0) cap = Math.min(cap, limit);
+    var hardCap = cap;
+
+    /* 页数：接口页数上限、用户"最大翻页数"、按 cap 反推所需页数，三者取最小。
+       同时记下"是谁先卡住的"，好让提示文案说得准（用户设的限 vs 接口的限）。 */
+    var maxPages = cfg.get('maxPages');
+    var pageLimitFrom = 'user';
+    if (spec.maxPages !== Infinity && spec.maxPages < maxPages) { maxPages = spec.maxPages; pageLimitFrom = 'endpoint'; }
+    if (hardCap !== Infinity) {
+      var needPages = Math.ceil(hardCap / ps);
+      if (needPages < maxPages) { maxPages = needPages; pageLimitFrom = 'cap'; }
+    }
 
     var collected = [];
     var total = null;
@@ -782,9 +831,15 @@
       if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
       var j = await throttled(function () {
-        return apiGet('/x/relation/followings', {
-          vmid: vmid, pn: pn, ps: ps, order_type: orderType
-        }, { signal: signal });
+        return apiGet(spec.path, {
+          vmid: vmid, pn: pn, ps: ps,
+          order_type: isSelf ? orderType : ''
+        }, {
+          signal: signal,
+          base: spec.base,          /* app 接口换域名 */
+          forceGM: spec.forceGM,    /* app 域名无 CORS 头，直接走后台，省掉一次注定失败的请求 */
+          referer: useApp ? false : true
+        });
       }, signal);
 
       if (j && j.code === 0) {
@@ -794,14 +849,24 @@
         collected = collected.concat(list);
         onProgress({ page: pn, got: collected.length, total: total, isSelf: isSelf });
 
-        if (collected.length >= hardCap) { stopped = 'cap'; break; }
+        /* 到顶了。区分是"用户自己设的条数上限"还是"接口硬上限" */
+        if (collected.length >= hardCap) {
+          stopped = (hardCap < byEndpoint) ? 'cap' : 'endpoint';
+          break;
+        }
         if (!list.length) { stopped = 'empty'; break; }
         if (list.length < ps) { stopped = 'end'; break; }
         if (total !== null && collected.length >= total) { stopped = 'total'; break; }
+        if (pn >= maxPages) {
+          stopped = (pageLimitFrom === 'endpoint') ? 'endpoint'
+            : (pageLimitFrom === 'cap' ? 'cap' : 'more');
+        }
         continue;
       }
 
       var code = j ? j.code : null;
+      /* 22007 是兼容接口的翻页上限，属于"正常走到顶"，不当错误处理 */
+      if (code === 22007) { stopped = 'endpoint'; break; }
       if (RETRYABLE.indexOf(code) >= 0 && retries < cfg.get('retryMax')) {
         retries++;
         await backoff(code, signal, retries);
@@ -828,6 +893,8 @@
       isSelf: isSelf,
       selfMid: selfMid,
       total: total !== null ? total : out.length,
+      endpoint: useApp ? 'app' : 'web',
+      endpointMax: isSelf ? null : spec.othersMax,
       stopped: stopped
     };
   }
@@ -1416,11 +1483,19 @@
       renderHead();
       renderTable();
 
+      var endNote = '';
+      if (res.stopped === 'cap') endNote = '（已达你在设置里的条数上限，已截断）';
+      else if (res.stopped === 'endpoint') endNote = '（已达该接口上限，B 站不再返回更多）';
+      else if (res.stopped === 'more') endNote = '（已达「最大翻页数」设置，后面还有更多）';
+
       var note = '';
       if (!res.isSelf) {
-        note = '　（查询的是 ' + vmid + ' 的关注列表，最多前 ' + cfg.get('othersCap') + ' 条）';
+        note = '　· ' + (res.endpoint === 'app' ? '兼容接口' : '标准接口') +
+          '（上限 ' + res.endpointMax + ' 条）　· 对方关注总数 ' + res.total;
+      } else if (res.total) {
+        note = '　· 关注总数 ' + res.total;
       }
-      showMsg(msgEl, '完成：共 ' + state.rows.length + ' 条' + (res.stopped === 'cap' ? '（已达上限截断）' : '') + note, 'ok');
+      showMsg(msgEl, '完成：共 ' + state.rows.length + ' 条' + endNote + note, 'ok');
       toast('拉取完成，共 ' + state.rows.length + ' 条');
     } catch (e) {
       reportError(msgEl, e);
@@ -1474,7 +1549,7 @@
         h('input', { type: 'text', placeholder: '粘贴对方主页链接 / b23.tv 短链 / 直接输入 mid', id: 'bft-other' }),
         h('button', { class: 'primary', text: '拉取 TA 的关注', onclick: function () { runList('other'); } })
       ),
-      h('div', { class: 'muted gap' }, '需要对方开放关注列表权限，且最多返回前 100 条。'),
+      h('div', { class: 'muted gap' }, '需要对方开放关注列表权限。默认走兼容接口，最多前 5 页共 250 条；可在设置里切回标准接口（只有前 100 条）。'),
       h('div', { class: 'msg', hidden: true })
     );
     ui.inOther = paneOther.querySelector('input');

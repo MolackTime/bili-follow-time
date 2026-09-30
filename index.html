@@ -212,7 +212,7 @@
     <div class="feats">
       <div class="feat"><div class="t">🔍 单个查询</div><div class="d">粘贴主页链接或直接填 mid，立刻显示「你关注 TA 的时间」，并区分未关注 / 已关注 / 已互粉 / 已拉黑。</div></div>
       <div class="feat"><div class="t">📋 我的关注列表</div><div class="d">输入框留空即自动识别你的账号；也可以粘贴你自己的主页链接。翻页拉取全部关注，逐条列出关注时间。</div></div>
-      <div class="feat"><div class="t">👥 查 TA 的关注列表</div><div class="d">粘贴对方主页链接（或 b23.tv 短链、直接填 mid）即可查看，需对方开放关注列表权限，最多前 100 条。</div></div>
+      <div class="feat"><div class="t">👥 查 TA 的关注列表</div><div class="d">粘贴对方主页链接（或 b23.tv 短链、直接填 mid）即可查看，需对方开放关注列表权限。最多 250 条（标准接口只给前 100 条，可切换）。</div></div>
       <div class="feat"><div class="t">🗓 按年筛选</div><div class="d">下拉选年份，比如「2015 年关注的人」，结果即时收敛。</div></div>
       <div class="feat"><div class="t">↕ 排序与搜索</div><div class="d">点表头按关注时间 / 昵称 / 关系排序，支持昵称与 mid 关键词搜索。</div></div>
       <div class="feat"><div class="t">⤓ 导出 CSV / JSON</div><div class="d">CSV 自带 BOM，Excel 打开不乱码；分隔符与导出字段都可勾选。</div></div>
@@ -331,7 +331,8 @@
 
     <details>
       <summary>能查别人的关注时间吗？</summary>
-      <p>能查两件事。一是「<b>你</b>关注 TA 的时间」——这个任何人都能查（用你自己的账号）。二是「<b>TA 的关注列表里每个人的关注时间</b>」——这需要对方开放了关注列表权限，而且 B 站最多只返回前 100 条。</p>
+      <p>能查两件事。一是「<b>你</b>关注 TA 的时间」——这个任何人都能查（用你自己的账号）。二是「<b>TA 的关注列表里每个人的关注时间</b>」——这需要对方开放了关注列表权限。</p>
+      <p>关于条数上限：B 站公开接口只给前 <b>100</b> 条，而且<b>超过 100 条时会静默返回空列表</b>（状态码还是 0，很容易让人误以为对方只关注了 100 人）。脚本默认走<b>另一条兼容接口，可以拿到前 5 页共 250 条</b>；这个也能在设置里切回标准接口。</p>
       <p>两处输入框都支持<b>粘贴主页链接</b>（<code>space.bilibili.com/xxx</code>、<code>b23.tv</code> 短链、App 分享出来的带标题文案）、也支持直接填一串纯数字 mid，看哪个顺手用哪个。</p>
       <p>如果对方关闭了权限，接口会返回明确的错误，脚本会告诉你原因。</p>
     </details>
