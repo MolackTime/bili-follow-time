@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站关注时间一键查询
 // @namespace    https://github.com/MolackTime/bili-follow-time
-// @version      1.2.0
+// @version      1.2.1
 // @description  查询你关注某个 UP 主的时间；导出/筛选/排序你的全部关注列表。所有参数均可在设置面板中调整。
 // @author       MolackTime
 // @license      MIT
@@ -34,7 +34,7 @@
    * 0. 常量
    * ======================================================================= */
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.2.1';
   var DEFAULT_API_BASE = 'https://api.bilibili.com';
   var CFG_PREFIX = 'bft:cfg:';
   var UI_PREFIX = 'bft:ui:';
@@ -1060,13 +1060,20 @@
       });
   }
 
+  /* 返回 { url, version } —— 不仅要知道最新版本是多少，还要知道【哪个源】报的。
+     坑：jsDelivr 有 12 小时分支缓存，刚发版时它仍返回旧版本。
+     如果更新时照旧打开"安装来源 URL"（多半是 jsDelivr），就会重新装回旧版，
+     于是「发现新版本」永远反复出现。所以必须用报出最新版的那个源去更新。 */
   function fetchLatestVersion() {
     return Promise.all(UPDATE_SOURCES.map(function (u) {
-      return fetchText(u).then(extractVersion).catch(function () { return null; });
+      return fetchText(u).then(function (t) {
+        var v = extractVersion(t);
+        return v ? { url: u, version: v } : null;
+      }).catch(function () { return null; });
     })).then(function (list) {
       var best = null;
-      list.forEach(function (v) {
-        if (v && (!best || cmpVer(v, best) > 0)) best = v;
+      list.forEach(function (r) {
+        if (r && (!best || cmpVer(r.version, best.version) > 0)) best = r;
       });
       return best;
     });
@@ -1101,7 +1108,9 @@
   }
 
   function openUpdate() {
-    window.open(updateInstallUrl(), '_blank', 'noopener');
+    /* 优先用「报出最新版本的那个源」，而不是安装来源 URL ——
+       jsDelivr 的 12 小时缓存会让我们又装回旧版本，导致提示反复出现。 */
+    window.open((updateInfo && updateInfo.url) || updateInstallUrl(), '_blank', 'noopener');
     toast('已打开安装页 —— 点「重新安装 / 安装」即可');
   }
 
@@ -1122,21 +1131,21 @@
     }
     if (manual && ui.verBtn) ui.verBtn.disabled = true;
 
-    var latest = null;
-    try { latest = await fetchLatestVersion(); } catch (e) { /* 全部源都挂了 */ }
+    var found = null;   /* { url, version } */
+    try { found = await fetchLatestVersion(); } catch (e) { /* 全部源都挂了 */ }
 
     GM_setValue(LAST_CHECK_KEY, Date.now());
     if (manual && ui.verBtn) ui.verBtn.disabled = false;
 
-    if (!latest) {
+    if (!found) {
       if (manual) toast('检查更新失败：镜像与原始地址都不可达', 'warn');
       return;
     }
 
-    if (cmpVer(latest, VERSION) > 0 && GM_getValue(DISMISS_KEY, '') !== latest) {
-      updateInfo = { latest: latest };
+    if (cmpVer(found.version, VERSION) > 0 && GM_getValue(DISMISS_KEY, '') !== found.version) {
+      updateInfo = { latest: found.version, url: found.url };
       applyUpdateUI();
-      if (manual) toast('发现新版本 v' + latest);
+      if (manual) toast('发现新版本 v' + found.version);
     } else {
       updateInfo = null;
       applyUpdateUI();
