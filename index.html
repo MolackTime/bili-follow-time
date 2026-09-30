@@ -107,6 +107,20 @@
   .irow .body b{display:block;font-size:14.5px;margin-bottom:3px}
   .irow .body span{font-size:13.3px;color:var(--muted)}
   .irow .body code{word-break:break-all}
+  .urlline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}
+  .urlline code{flex:1;min-width:200px}
+  .mini{
+    font:inherit;font-size:12.5px;cursor:pointer;padding:4px 11px;border-radius:6px;
+    border:1px solid var(--line);background:var(--bg);color:var(--fg-2);flex:none;
+  }
+  .mini:hover{border-color:var(--accent);color:var(--accent)}
+  .mini.ok{border-color:#2e9e5b;color:#2e9e5b}
+  .fb{margin-top:12px;border:1px dashed var(--line);border-radius:9px;padding:11px 13px;background:var(--bg)}
+  .fb[open]{background:var(--bg-soft)}
+  .fb summary{font-size:13.2px;font-weight:600;color:var(--accent)}
+  .fb ol{margin:9px 0 0;padding-left:20px;font-size:13px;color:var(--fg-2);line-height:1.9}
+  .fb ol li{margin-bottom:3px}
+  .fb p{margin:9px 0 0;padding-left:0;font-size:13px;color:var(--fg-2);line-height:1.75}
 
   /* ---------- faq ---------- */
   details{border:1px solid var(--line);border-radius:10px;padding:13px 16px;margin-bottom:9px;background:var(--bg)}
@@ -148,12 +162,15 @@
     <p class="sub-sm">支持导出全部关注列表 · 排序 / 按年筛选 / CSV·JSON 导出 · 所有参数可调</p>
 
     <div class="btns">
-      <a class="btn btn-primary" id="btn-install" href="#">⤓ 安装用户脚本</a>
-      <a class="btn btn-ghost" id="btn-mirror" href="#">备用安装（镜像）</a>
+      <a class="btn btn-primary" id="btn-install" href="#" target="_blank" rel="noopener">⤓ 安装用户脚本</a>
+      <a class="btn btn-ghost" id="btn-mirror" href="#" target="_blank" rel="noopener">备用安装（镜像）</a>
+      <a class="btn btn-ghost" id="btn-tm" href="https://www.tampermonkey.net/" target="_blank" rel="noopener">没装油猴？先装它</a>
       <a class="btn btn-ghost" id="btn-repo" href="#" target="_blank" rel="noopener">GitHub 源码</a>
     </div>
-    <p class="note">首次使用需先安装浏览器扩展 <b>Tampermonkey</b>（油猴）——
-      <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">官方网站</a>
+    <p class="note">顺序是：先装 <b>Tampermonkey</b>（油猴），再回到本页点「安装用户脚本」。
+      <a href="https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd" target="_blank" rel="noopener">Edge 商店</a> ·
+      <a href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank" rel="noopener">Chrome 商店</a> ·
+      <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">官网</a>
     </p>
   </div>
 </header>
@@ -224,10 +241,23 @@
         <span class="inum">2</span>
         <div class="body">
           <b>点页面顶部的「安装用户脚本」</b>
-          <span>Tampermonkey 会弹出安装界面，点「安装」即可。若链接打不开（网络原因），改用「备用安装（镜像）」。<br>
-            也可以手动把这个地址粘贴到地址栏：<br>
+          <span>Tampermonkey 会弹出安装界面，点「安装」即可。若这个链接打不开（网络原因），改用「备用安装（镜像）」。</span>
+          <div class="urlline">
             <code id="install-url">加载中…</code>
-          </span>
+            <button class="mini" id="btn-copy-url" type="button">复制</button>
+          </div>
+          <details class="fb">
+            <summary>点了没反应 / 没弹出安装界面？</summary>
+            <ol>
+              <li>确认 <b>Tampermonkey 已安装且处于启用状态</b>（浏览器右上角图标是亮的）。没装就先做第 1 步。</li>
+              <li>确认油猴处于<b>新手模式</b>：Tampermonkey 设置 → 「配置模式」选 <b>新手</b>。</li>
+              <li><b>手动安装（最可靠）</b>：点 Tampermonkey 图标 → <b>管理面板</b> → 左侧 <b>实用工具</b> → 找到 <b>「从 URL 安装」</b> → 把上面的地址粘进去 → 点「安装」。</li>
+              <li>或者把上面的地址直接粘到浏览器地址栏回车。</li>
+            </ol>
+            <p>⚠️ 油猴只会在「<b>https 地址上真实存在的 <code>.user.js</code> 文件</b>」上弹出安装界面。
+              所以通过本地文件、<code>127.0.0.1</code> 预览页、或任何非 https 的地址点安装，都不会有反应。</p>
+            <p>另外，国产浏览器（360 / QQ / 搜狗 等）对油猴的安装拦截支持较差，建议改用 <b>Edge</b> 或 <b>Chrome</b>。</p>
+          </details>
         </div>
       </div>
       <div class="irow">
@@ -348,31 +378,25 @@
   var FILE = 'bili-follow-time.user.js';
 
   /* GitHub Pages 会把域名强制小写，所以 seg[0] 拿到的是 "molacktime"。
-     jsDelivr 的 owner 大小写不敏感（已实测），但 raw 镜像路径不保证，
-     因此这里按大小写无关比对，命中本仓库就换回规范写法，保证链接两种通道都稳。
-     如果是别人 fork 后的站点，则保持其自身用户名不变。 */
+     jsDelivr 的 owner 大小写不敏感（已实测：torvalds / TORVALDS 均 200），
+     但 raw 镜像路径不保证，因此按大小写无关比对，命中本仓库就换回规范写法。
+     如果是别人 fork 后的站点，保持其自身用户名不变。 */
   var CANONICAL_OWNER = 'MolackTime';
+  var DEFAULT_REPO = 'bili-follow-time';
   if (isPages && USER && USER.toLowerCase() === CANONICAL_OWNER.toLowerCase()) {
     USER = CANONICAL_OWNER;
   }
 
-  var installUrl, mirrorUrl, repoUrl;
+  /* 关键：只有「https 地址上真实存在的 .user.js」才会触发 Tampermonkey 的安装拦截。
+     本地预览（file:// / localhost）和无法识别的域名如果指向相对路径，
+     油猴根本不会理——点了按钮等于没反应。所以这些情况一律回落到正式 CDN 地址，
+     这样无论在哪种页面下点「安装用户脚本」，行为都一致。 */
+  var owner = (isPages && USER) ? USER : CANONICAL_OWNER;
+  var repo = (isPages && REPO) ? REPO : DEFAULT_REPO;
 
-  if (isPages && REPO) {
-    installUrl = 'https://cdn.jsdelivr.net/gh/' + USER + '/' + REPO + '@main/' + FILE;
-    mirrorUrl  = 'https://gh-proxy.com/https://raw.githubusercontent.com/' + USER + '/' + REPO + '/main/' + FILE;
-    repoUrl    = 'https://github.com/' + USER + '/' + REPO;
-  } else if (isLocal) {
-    installUrl = './' + FILE;
-    mirrorUrl  = './' + FILE;
-    repoUrl    = 'https://github.com/' + CANONICAL_OWNER + '/' + (REPO || 'bili-follow-time');
-  } else {
-    /* 自定义域名等未知情况：安装链接退化为相对路径（同源必然可用），
-       仓库链接回落到已知的正式仓库 */
-    installUrl = './' + FILE;
-    mirrorUrl  = './' + FILE;
-    repoUrl    = 'https://github.com/' + CANONICAL_OWNER + '/' + (REPO || 'bili-follow-time');
-  }
+  var installUrl = 'https://cdn.jsdelivr.net/gh/' + owner + '/' + repo + '@main/' + FILE;
+  var mirrorUrl = 'https://gh-proxy.com/https://raw.githubusercontent.com/' + owner + '/' + repo + '/main/' + FILE;
+  var repoUrl = 'https://github.com/' + owner + '/' + repo;
 
   function set(id, attr, val) {
     var el = document.getElementById(id);
@@ -387,6 +411,54 @@
   var urlEl = document.getElementById('install-url');
   if (urlEl) urlEl.textContent = installUrl;
 
+  /* 复制安装地址（手动安装兜底路径要用） */
+  var copyBtn = document.getElementById('btn-copy-url');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', function () {
+      function done() {
+        copyBtn.textContent = '已复制 ✓';
+        copyBtn.classList.add('ok');
+        setTimeout(function () {
+          copyBtn.textContent = '复制';
+          copyBtn.classList.remove('ok');
+        }, 1800);
+      }
+      function legacyCopy() {
+        var ta = document.createElement('textarea');
+        ta.value = installUrl;
+        ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) { window.prompt('手动复制：', installUrl); }
+        document.body.removeChild(ta);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(installUrl).then(done, legacyCopy);
+      } else {
+        legacyCopy();
+      }
+    });
+  }
+
+  /* 自检：安装地址是否真能取到。避免用户对着一个死链点半天。
+     取不到时只提示（可能是网络/墙），不阻断任何操作。 */
+  (function preflight() {
+    if (typeof fetch !== 'function') return;
+    fetch(installUrl, { method: 'HEAD', cache: 'no-store' })
+      .then(function (r) {
+        if (r.ok) return;
+        var host = document.querySelector('.urlline');
+        if (!host) return;
+        var p = document.createElement('p');
+        p.style.cssText = 'margin:9px 0 0;font-size:13px;line-height:1.7;color:#b7791f;' +
+          'background:#fffaf0;border:1px solid rgba(183,121,31,.3);border-radius:8px;padding:9px 12px';
+        p.textContent = '⚠ 安装地址当前返回 HTTP ' + r.status +
+          '：可能仓库还没推送，或 jsDelivr 尚未收录该文件。可先试「备用安装（镜像）」，或稍等几分钟再刷新。';
+        host.parentNode.insertBefore(p, host.nextSibling);
+      })
+      .catch(function () { /* 跨域 / 离线：静默，避免误报 */ });
+  })();
+
   /* 原文链接：未填写时隐藏该项，避免出现死链 */
   var origin = document.getElementById('origin-link');
   if (origin && (!origin.getAttribute('href') || origin.getAttribute('href') === 'ORIGIN_ARTICLE_URL')) {
@@ -397,7 +469,10 @@
   /* 本地预览时给个提示 */
   if (isLocal) {
     var note = document.querySelector('.note');
-    if (note) note.innerHTML += '<br><span style="color:#b7791f">当前为本地预览，安装链接指向本地文件；推到 GitHub Pages 后会自动变成正确的 CDN 地址。</span>';
+    if (note) {
+      note.innerHTML += '<br><span style="color:#b7791f">当前是本地预览（不是 GitHub Pages），' +
+        '安装链接已直接指向正式 CDN 地址，可以照常点击测试。</span>';
+    }
   }
 })();
 </script>
